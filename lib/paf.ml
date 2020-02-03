@@ -37,7 +37,7 @@ module Httpaf
     let src = Cstruct.to_bigarray src in
     Bigstringaf.blit src ~src_off dst ~dst_off ~len
 
-  let rec recv flow ~read =
+  let rec recv flow ~read ~read_eof =
     match Ke.N.peek flow.queue with
     | [] ->
       let len = min (Ke.available flow.queue) (Cstruct.len flow.rd) in
@@ -45,11 +45,11 @@ module Httpaf
       ( Flow.recv flow.flow raw >>= function
           | Error err -> Lwt.fail (Recv_error err)
           | Ok `End_of_input ->
-            let _ (* 0 *) = read Bigstringaf.empty ~off:0 ~len:0 in
+            let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
             flow.closed <- true ; Lwt.return ()
           | Ok (`Input len) ->
             let _ = Ke.N.push_exn flow.queue ~blit ~length:Cstruct.len ~off:0 ~len raw in
-            recv flow ~read )
+            recv flow ~read ~read_eof )
     | src :: _ ->
       let len = Bigstringaf.length src in
       let shift = read src ~off:0 ~len in
@@ -91,7 +91,9 @@ module Httpaf
       let rec rd_fiber () =
         let go () = match Server_connection.next_read_operation connection with
           | `Read ->
-            recv flow ~read:(Server_connection.read connection)
+            recv flow
+              ~read:(Server_connection.read connection)
+              ~read_eof:(Server_connection.read_eof connection)
           | `Yield ->
             Server_connection.yield_reader connection rd_fiber ;
             Lwt.return ()
