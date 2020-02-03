@@ -1,3 +1,4 @@
 (library
  (name paf)
- (libraries ke lwt httpaf tuyau.mirage tuyau.mirage.tcp tuyau.mirage.tls))
+ (public_name paf)
+ (libraries ke httpaf tuyau.mirage tuyau.mirage.tcp tuyau.mirage.tls))
