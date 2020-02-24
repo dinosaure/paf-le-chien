@@ -14,8 +14,8 @@ module type HTTPAF = sig
 end
 
 module Httpaf
-    (Service : Tuyau_mirage.S)
-    (Flow : Tuyau_mirage.F with type flow = Service.flow)
+    (Service : Tuyau_mirage.SERVICE)
+    (Flow : Tuyau_mirage.PROTOCOL with type flow = Service.flow)
   : HTTPAF with type flow = Flow.flow
 = struct
   let src = Logs.Src.create "paf"
@@ -77,6 +77,7 @@ module Httpaf
             if ws = len then go (w + ws) rest
             else Lwt.return (`Ok (w + ws))
           | Error err ->
+            Log.err (fun m -> m "Got an error while sending data.") ;
             (* TODO(dinosaure): [Socket_closed]. *)
             flow.wr_closed <- true ;
             Lwt.fail (Send_error err) in
@@ -152,7 +153,14 @@ module Httpaf
         Lwt.catch go (fun exn -> Server_connection.report_exn connection exn ; Lwt.return ()) in
       rd_fiber () ;
       wr_fiber () ;
-      Lwt.join [ rd_exit; wr_exit ] >>= fun () ->
+      let threads = [ rd_exit; wr_exit; ] in
+      let catch_and_cancel = function
+        | Lwt.Canceled -> ()
+        | v ->
+          List.iter Lwt.cancel threads ;
+          !Lwt.async_exception_hook v in
+      List.iter (fun th -> Lwt.on_failure th catch_and_cancel) threads ;
+      Lwt.join threads >>= fun () ->
       let ip, port = edn in
       Log.debug (fun m -> m "close <%a:%d>." Ipaddr.V4.pp ip port) ;
       if not flow.rd_closed || not flow.wr_closed
