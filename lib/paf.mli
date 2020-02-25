@@ -1,7 +1,7 @@
 open Tuyau_mirage
 
-module Make (StackV4 : Mirage_stack.V4) : sig
-  module TCP : module type of Tuyau_mirage_tcp.Make(StackV4)
+module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) : sig
+  module TCP : module type of Tuyau_mirage_tcp.Make(Time)(StackV4)
 
   val tls_endpoint : (TCP.endpoint * Tls.Config.client) key
   val tls_configuration : (TCP.configuration * Tls.Config.server) key
