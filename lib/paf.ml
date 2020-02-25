@@ -191,10 +191,10 @@ module Httpaf
     connection_handler
 end
 
-module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
+module Make (StackV4 : Mirage_stack.V4) = struct
   open Lwt.Infix
 
-  module TCP = Tuyau_mirage_tcp.Make(Time)(StackV4)
+  module TCP = Tuyau_mirage_tcp.Make(StackV4)
 
   let tls_endpoint, tls_protocol = Tuyau_mirage_tls.protocol_with_tls ~key:TCP.endpoint TCP.protocol
   let tls_configuration, tls_service = Tuyau_mirage_tls.service_with_tls ~key:TCP.configuration TCP.service tls_protocol
