@@ -14,6 +14,7 @@ module type HTTPAF = sig
 end
 
 module Httpaf
+    (Time : Mirage_time.S)
     (Service : Tuyau_mirage.SERVICE)
     (Flow : Tuyau_mirage.PROTOCOL with type flow = Service.flow)
   : HTTPAF with type flow = Flow.flow
@@ -35,6 +36,7 @@ module Httpaf
   exception Recv_error of Flow.error
   exception Send_error of Flow.error
   exception Close_error of Flow.error
+  exception Timeout
 
   open Lwt.Infix
 
@@ -75,11 +77,20 @@ module Httpaf
         | { Faraday.buffer; Faraday.off; Faraday.len; } :: rest ->
           let raw = Cstruct.of_bigarray buffer ~off ~len in
           Log.debug (fun m -> m "-> %S" (Cstruct.to_string raw)) ;
-          Flow.send flow.flow raw >>= function
+          let sleep () =
+            Time.sleep_ns 1000000000L >>= fun () -> Lwt.return (Error `Timeout) in
+          Lwt.pick [ sleep ()
+                   ; Flow.send flow.flow raw
+                     >|= Rresult.R.reword_error (fun err -> `Send err) ]
+          >>= function
           | Ok ws ->
             if ws = len then go (w + ws) rest
             else Lwt.return (`Ok (w + ws))
-          | Error err ->
+          | Error `Timeout ->
+            Log.err (fun m -> m "Timeout on send (more than 1s to send something)") ;
+            flow.wr_closed <- true ;
+            Lwt.fail Timeout
+          | Error (`Send err) ->
             Log.err (fun m -> m "Got an error while sending data.") ;
             (* TODO(dinosaure): [Socket_closed]. *)
             flow.wr_closed <- true ;
@@ -191,7 +202,7 @@ module Httpaf
     connection_handler
 end
 
-module Make (StackV4 : Mirage_stack.V4) = struct
+module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
   open Lwt.Infix
 
   module TCP = Tuyau_mirage_tcp.Make(StackV4)
@@ -206,7 +217,7 @@ module Make (StackV4 : Mirage_stack.V4) = struct
   let http ?config ~error_handler ~request_handler master =
     Tuyau_mirage.impl_of_service ~key:TCP.configuration TCP.service |> Lwt.return >>? fun (module Service) ->
     Tuyau_mirage.impl_of_protocol ~key:TCP.endpoint TCP.protocol |> Lwt.return >>? fun (module Protocol) ->
-    let module Httpaf = Httpaf(Service)(Protocol) in
+    let module Httpaf = Httpaf(Time)(Service)(Protocol) in
     let handler edn flow = Httpaf.create_connection_handler ?config ~error_handler ~request_handler edn flow in
     let rec go () =
       let open Lwt.Infix in
@@ -221,7 +232,7 @@ module Make (StackV4 : Mirage_stack.V4) = struct
     let open Rresult in
     Tuyau_mirage.impl_of_service ~key:tls_configuration tls_service |> Lwt.return >>? fun (module Service) ->
     Tuyau_mirage.impl_of_protocol ~key:tls_endpoint tls_protocol |> Lwt.return >>? fun (module Protocol) ->
-    let module Httpaf = Httpaf(Service)(Protocol) in
+    let module Httpaf = Httpaf(Time)(Service)(Protocol) in
     let handler edn flow = Httpaf.create_connection_handler ?config ~error_handler ~request_handler edn flow in
     let rec go () =
       let open Lwt.Infix in

@@ -1,4 +1,4 @@
 (library
  (name paf)
  (public_name paf)
- (libraries ke httpaf tuyau-tls tuyau-mirage tuyau-mirage.tcp tuyau-mirage.tls))
+ (libraries mirage-time ke httpaf tuyau-tls tuyau-mirage tuyau-mirage.tcp tuyau-mirage.tls))

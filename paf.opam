@@ -18,6 +18,7 @@ depends: [
   "tuyau"
   "tuyau-tls"
   "tuyau-mirage"
+  "mirage-time"
   "httpaf"
   "ke"
 ]
