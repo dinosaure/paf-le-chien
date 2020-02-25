@@ -151,8 +151,13 @@ module Httpaf
         let rec go () = match Server_connection.next_write_operation connection with
           | `Write iovecs ->
             Log.debug (fun m -> m "[`write]");
-            send flow iovecs >>= fun len ->
-            Server_connection.report_write_result connection len ;
+            send flow iovecs >>= fun res ->
+            Log.debug (fun m ->
+                let pp_res ppf = function
+                  | `Ok len -> Fmt.pf ppf "(`Ok %d byte(s))" len
+                  | `Closed -> Fmt.pf ppf "`Closed" in
+                m "[`write] write %a" pp_res res) ;
+            Server_connection.report_write_result connection res ;
             go ()
           | `Yield ->
             Log.debug (fun m -> m "[write:`yield]") ;
