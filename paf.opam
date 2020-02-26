@@ -16,6 +16,9 @@ depends: [
   "ocaml"       {>= "4.07.0"}
   "dune"
   "tuyau"
+  "tuyau-tls"
+  "tuyau-mirage"
+  "mirage-time"
   "httpaf"
   "ke"
 ]
