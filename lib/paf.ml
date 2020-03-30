@@ -88,6 +88,11 @@ module Httpaf
             else Lwt.return (`Ok (w + ws))
           | Error `Timeout ->
             Log.err (fun m -> m "Timeout on send (more than 1s to send something)") ;
+            (* XXX(dinosaure): from an unikernel, it seems that if we reach [`Timeout],
+               the socket is already closed. We must avoid a double-close. However, I'm not sure
+               about that and we probably leak a file-descr. *)
+            flow.closed <- true ;
+            flow.rd_closed <- true ;
             flow.wr_closed <- true ;
             Lwt.fail Timeout
           | Error (`Send err) ->
