@@ -230,7 +230,7 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
       | Error err -> Lwt.return (Rresult.R.error_msgf "%a" Service.pp_error err)
       | Ok flow ->
         let edn = TCP.dst flow in
-        handler edn flow >>= go in
+        Lwt.async (fun () -> handler edn flow) ; Lwt.pause () >>= go in
     go ()
 
   let https ?config ~error_handler ~request_handler master =
