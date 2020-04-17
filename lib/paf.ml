@@ -134,8 +134,8 @@ module Httpaf
               ~read_eof:(Server_connection.read_eof connection) >>= function
               | `Closed ->
                 Log.debug (fun m -> m "[`read] Connection closed (wake-up threads)") ;
-                Lwt.wakeup notify_rd_exit () ;
-                Lwt.wakeup notify_wr_exit () ;
+                Lwt.wakeup_later notify_rd_exit () ;
+                Lwt.wakeup_later notify_wr_exit () ;
                 flow.rd_closed <- true ;
                 Lwt.return ()
               | `Continue -> Log.debug (fun m -> m "[`read] is done.") ; go () )
@@ -161,7 +161,7 @@ module Httpaf
         Lwt.catch go (fun exn ->
             Server_connection.report_exn connection exn ;
             Log.warn (fun m -> m "[`read] got an exception: %s" (Printexc.to_string exn)) ;
-            if Lwt.state rd_exit = Sleep then Lwt.wakeup notify_rd_exit () ;
+            if Lwt.state rd_exit = Sleep then Lwt.wakeup_later notify_rd_exit () ;
             Lwt.return ()) in
       let rec wr_fiber () =
         let rec go () = match Server_connection.next_write_operation connection with
@@ -188,7 +188,7 @@ module Httpaf
         Lwt.catch go (fun exn ->
             Server_connection.report_exn connection exn ;
             Log.warn (fun m -> m "[`write] got an exception: %s" (Printexc.to_string exn)) ;
-            if Lwt.state wr_exit = Sleep then Lwt.wakeup notify_wr_exit () ;
+            if Lwt.state wr_exit = Sleep then Lwt.wakeup_later notify_wr_exit () ;
             Lwt.return ()) in
       rd_fiber () ;
       wr_fiber () ;
