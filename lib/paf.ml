@@ -1,18 +1,24 @@
 module Ke = Ke.Rke.Weighted
 
-let ( <.> ) f g = fun x -> f (g x)
-
 module type HTTPAF = sig
-  type endpoint = Ipaddr.V4.t * int
   type flow
 
-  val create_connection_handler
+  val create_server_connection_handler
     :  ?config:Httpaf.Config.t
-    -> request_handler:(endpoint -> Httpaf.Server_connection.request_handler)
-    -> error_handler:(endpoint -> Httpaf.Server_connection.error_handler)
-    -> endpoint
+    -> request_handler:('endpoint -> Httpaf.Server_connection.request_handler)
+    -> error_handler:('endpoint -> Httpaf.Server_connection.error_handler)
+    -> 'endpoint
     -> flow
     -> unit Lwt.t
+
+  val request
+    :  ?config:Httpaf.Config.t
+    -> flow
+    -> 'endpoint
+    -> Httpaf.Request.t
+    -> error_handler:('endpoint -> Httpaf.Client_connection.error_handler)
+    -> response_handler:('endpoint -> Httpaf.Client_connection.response_handler)
+    -> [ `write ] Httpaf.Body.t
 end
 
 module Httpaf
@@ -30,7 +36,6 @@ module Httpaf
     ; mutable rd_closed : bool
     ; mutable wr_closed : bool }
   and flow = Tuyau.flow
-  and endpoint = Ipaddr.V4.t * int
   
   exception Recv_error  of string
   exception Send_error  of string
@@ -42,17 +47,6 @@ module Httpaf
     let src = Cstruct.to_bigarray src in
     Bigstringaf.blit src ~src_off dst ~dst_off ~len
 
-  let concat lst =
-    let len = List.fold_left (fun a x -> a + Bigstringaf.length x) 0 lst in
-    let res = Bigstringaf.create len in
-    let rec transmit off = function
-      | [] -> ()
-      | src :: rest ->
-        let len = Bigstringaf.length src in
-        Bigstringaf.blit src ~src_off:0 res ~dst_off:off ~len ;
-        transmit (off + len) rest in
-    transmit 0 lst ; res
-  
   let safely_close flow =
     if flow.rd_closed && flow.wr_closed
     then
@@ -126,13 +120,13 @@ module Httpaf
            | Error (`Msg err) -> Lwt.fail (Close_error err) )
     else Lwt.return ()
   
-  let create_connection_handler ?(config= Httpaf.Config.default) ~request_handler ~error_handler =
+  let create_server_connection_handler ?(config= Httpaf.Config.default) ~request_handler ~error_handler =
     let connection_handler edn flow =
       let module Server_connection = Httpaf.Server_connection in
       let connection =
         Server_connection.create ~config ~error_handler:(error_handler edn)
           (request_handler edn) in
-      let queue, _ = Ke.create ~capacity:0x1000 Bigarray.Char in
+      let queue, _ = Ke.create ~capacity:0x1000 Bigarray.char in
       let flow =
         { flow
         ; tmp= Cstruct.create config.read_buffer_size
@@ -149,9 +143,11 @@ module Httpaf
               ~read_eof:(Server_connection.read_eof connection) >>= fun _ ->
             go ()
           | `Yield ->
+            Log.debug (fun m -> m "next read operation: `yield") ;
             Server_connection.yield_reader connection rd_fiber ;
             Lwt.return ()
           | `Close ->
+            Log.debug (fun m -> m "next read operation: `close") ;
             Lwt.wakeup_later notify_rd_exit () ;
             flow.rd_closed <- true ;
             safely_close flow in
@@ -162,13 +158,16 @@ module Httpaf
       let rec wr_fiber () =
         let rec go () = match Server_connection.next_write_operation connection with
           | `Write iovecs ->
+            Log.debug (fun m -> m "next write operation: `write") ;
             send flow iovecs >>= fun res ->
             Server_connection.report_write_result connection res ;
             go ()
           | `Yield ->
+            Log.debug (fun m -> m "next write operation: `yield") ;
             Server_connection.yield_writer connection wr_fiber ;
             Lwt.return ()
           | `Close _ ->
+            Log.debug (fun m -> m "next write operation: `close") ;
             Lwt.wakeup_later notify_wr_exit () ;
             flow.wr_closed <- true ;
             safely_close flow in
@@ -180,8 +179,66 @@ module Httpaf
       wr_fiber () ;
       let threads = [ rd_exit; wr_exit; ] in
       Lwt.join threads >>= fun () ->
+      Log.debug (fun m -> m "end of transmission.") ;
       close flow in
     connection_handler
+
+  let request ?(config= Httpaf.Config.default) flow edn request ~error_handler ~response_handler =
+    let module Client_connection = Httpaf.Client_connection in
+    let request_body, connection =
+      Client_connection.request ~config request
+        ~error_handler:(error_handler edn)
+        ~response_handler:(response_handler edn) in
+    let queue, _ = Ke.create ~capacity:0x1000 Bigarray.char in
+    let tmp = Cstruct.create config.read_buffer_size in
+    let flow = { flow; queue; tmp; rd_closed= false; wr_closed= false; } in
+    let read_loop_exited, notify_read_loop_exited = Lwt.wait () in
+
+    let rd_loop () =
+      let rec go () =
+        match Client_connection.next_read_operation connection with
+        | `Read ->
+          let read = Client_connection.read connection in
+          let read_eof = Client_connection.read_eof connection in
+          recv flow ~read ~read_eof >>= fun _ -> go ()
+        | `Close ->
+          Lwt.wakeup_later notify_read_loop_exited () ;
+          flow.rd_closed <- true ;
+          safely_close flow in
+      Lwt.async (fun () -> Lwt.catch go
+                    (fun exn ->
+                       Client_connection.report_exn connection exn ;
+                       Lwt.return ())) in
+    let writev = writev flow in
+    let write_loop_exited, notify_write_loop_exited = Lwt.wait () in
+
+    let rec wr_loop () =
+      let rec go () =
+        match Client_connection.next_write_operation connection with
+        | `Write iovecs ->
+          writev iovecs >>= fun res ->
+          Client_connection.report_write_result connection res ;
+          go ()
+        | `Yield ->
+          Client_connection.yield_writer connection wr_loop ;
+          Lwt.return ()
+        | `Close _ ->
+          Lwt.wakeup_later notify_write_loop_exited () ;
+          Lwt.return () in
+
+      Lwt.async (fun () -> Lwt.catch go
+                    (fun exn ->
+                       Client_connection.report_exn connection exn ;
+                       Lwt.return ())) in
+    rd_loop () ; wr_loop () ;
+    Lwt.async (fun () ->
+        Lwt.join [ read_loop_exited; write_loop_exited ] >>= fun () ->
+        if (not flow.rd_closed && flow.wr_closed) || (flow.rd_closed && not flow.wr_closed)
+        then Tuyau.close flow.flow >>= function
+          | Error (`Msg err) -> Lwt.fail (Close_error err)
+          | Ok () -> Lwt.return ()
+        else Lwt.return ()) ;
+    request_body
 end
 
 module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
@@ -190,8 +247,10 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
   module TCP = Tuyau_mirage_tcp.Make(StackV4)
   module Httpaf = Httpaf(Tuyau_mirage)(Time)
 
-  let tls_endpoint, tls_protocol = Tuyau_mirage_tls.protocol_with_tls ~key:TCP.endpoint TCP.protocol
-  let tls_configuration, tls_service = Tuyau_mirage_tls.service_with_tls ~key:TCP.configuration TCP.service tls_protocol
+  let tls_endpoint, tls_protocol =
+    Tuyau_mirage_tls.protocol_with_tls ~key:TCP.endpoint TCP.protocol
+  let tls_configuration, tls_service =
+    Tuyau_mirage_tls.service_with_tls ~key:TCP.configuration TCP.service tls_protocol
 
   let ( >>? ) x f = x >>= function
     | Ok x -> f x
@@ -200,7 +259,8 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
   let http ?config ~error_handler ~request_handler master =
     Tuyau_mirage.impl_of_service ~key:TCP.configuration TCP.service |> Lwt.return >>? fun (module Service) ->
     Tuyau_mirage.impl_of_protocol ~key:TCP.endpoint TCP.protocol |> Lwt.return >>? fun (module Protocol) ->
-    let handler edn flow = Httpaf.create_connection_handler ?config ~error_handler ~request_handler edn flow in
+    let handler edn flow =
+      Httpaf.create_server_connection_handler ?config ~error_handler ~request_handler edn flow in
     let rec go () =
       let open Lwt.Infix in
       Service.accept master >>= function
@@ -214,7 +274,8 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
     let open Rresult in
     Tuyau_mirage.impl_of_service ~key:tls_configuration tls_service |> Lwt.return >>? fun (module Service) ->
     Tuyau_mirage.impl_of_protocol ~key:tls_endpoint tls_protocol |> Lwt.return >>? fun (module Protocol) ->
-    let handler edn flow = Httpaf.create_connection_handler ?config ~error_handler ~request_handler edn flow in
+    let handler edn flow =
+      Httpaf.create_server_connection_handler ?config ~error_handler ~request_handler edn flow in
     let rec go () =
       let open Lwt.Infix in
       Service.accept master >>= function
@@ -223,4 +284,11 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
         let edn = TCP.dst (Tuyau_mirage_tls.underlying flow) in
         Lwt.async (fun () -> handler edn (Tuyau_mirage.Flow (flow, (module Protocol)))) ; Lwt.pause () >>= go in
     go ()
+
+  let request ?config ~resolvers ~error_handler ~response_handler domain_name request =
+    Tuyau_mirage.flow resolvers domain_name >|= function
+    | Error _ as err -> err
+    | Ok flow ->
+      let body = Httpaf.request ?config flow domain_name request ~error_handler ~response_handler in
+      Ok body
 end

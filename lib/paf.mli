@@ -22,4 +22,13 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) : sig
     -> request_handler:(Ipaddr.V4.t * int -> Httpaf.Server_connection.request_handler)
     -> TCP.service Tuyau_mirage_tls.service_with_tls
     -> (unit, [> Tuyau_mirage.error ]) result Lwt.t
+
+  val request
+    :  ?config:Httpaf.Config.t
+    -> resolvers:Tuyau.resolvers
+    -> error_handler:([ `host ] Domain_name.t -> Httpaf.Client_connection.error_handler)
+    -> response_handler:([ `host ] Domain_name.t -> Httpaf.Client_connection.response_handler)
+    -> [ `host ] Domain_name.t
+    -> Httpaf.Request.t
+    -> ([ `write ] Httpaf.Body.t, [> Tuyau_mirage.error ]) result Lwt.t
 end
