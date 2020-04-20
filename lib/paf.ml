@@ -1,7 +1,9 @@
-module Ke = Ke.Rke.Weighted
-
 module type HTTPAF = sig
   type flow
+
+  exception Send_error  of string
+  exception Recv_error  of string
+  exception Close_error of string
 
   val create_server_connection_handler
     :  ?config:Httpaf.Config.t
@@ -12,7 +14,8 @@ module type HTTPAF = sig
     -> unit Lwt.t
 
   val request
-    :  ?config:Httpaf.Config.t
+    :  ?handshake:(unit -> bool)
+    -> ?config:Httpaf.Config.t
     -> flow
     -> 'endpoint
     -> Httpaf.Request.t
@@ -28,11 +31,12 @@ module Httpaf
     (Time : Mirage_time.S) : HTTPAF with type flow = Tuyau.flow = struct
   let src = Logs.Src.create "paf"
   module Log = (val Logs.src_log src : Logs.LOG)
+  module We = Ke.Rke.Weighted
   
-  type t =
+  type server =
     { flow  : Tuyau.flow
     ; tmp   : Cstruct.t
-    ; queue : (char, Bigarray.int8_unsigned_elt) Ke.t
+    ; queue : (char, Bigarray.int8_unsigned_elt) We.t
     ; mutable rd_closed : bool
     ; mutable wr_closed : bool }
   and flow = Tuyau.flow
@@ -50,19 +54,19 @@ module Httpaf
   let safely_close flow =
     if flow.rd_closed && flow.wr_closed
     then
-      ( Log.debug (fun m -> m "close the connection.\n%!")
+      ( Log.debug (fun m -> m "Close the connection.")
       ; Tuyau.close flow.flow >>= function
       | Error (`Msg err) -> Lwt.fail (Close_error err)
       | Ok () -> Lwt.return () )
     else Lwt.return ()
   
   let rec recv flow ~read ~read_eof =
-    match Ke.N.peek flow.queue with
+    match We.N.peek flow.queue with
     | [] ->
       if flow.rd_closed
       then ( let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in Lwt.return `Closed )
       else
-        let len = min (Ke.available flow.queue) (Cstruct.len flow.tmp) in
+        let len = min (We.available flow.queue) (Cstruct.len flow.tmp) in
         let raw = Cstruct.sub flow.tmp 0 len in
         ( Tuyau.recv flow.flow raw >>= function
             | Error (`Msg err) -> Lwt.fail (Recv_error err)
@@ -72,18 +76,17 @@ module Httpaf
               flow.rd_closed <- true ;
               safely_close flow >>= fun () -> Lwt.return `Closed
             | Ok (`Input len) ->
-              Log.debug (fun m -> m "<- %S" (Cstruct.to_string (Cstruct.sub raw 0 len))) ;
-              let _ = Ke.N.push_exn flow.queue ~blit ~length:Cstruct.len ~off:0 ~len raw in
+              Log.debug (fun m -> m "<- %d byte(s)" len) ;
+              let _ = We.N.push_exn flow.queue ~blit ~length:Cstruct.len ~off:0 ~len raw in
               recv flow ~read ~read_eof )
     | src :: _ ->
       let len = Bigstringaf.length src in
-      Log.debug (fun m -> m "[`read] wants to transmit %S" (Bigstringaf.to_string src)) ;
       let shift = read src ~off:0 ~len in
       Log.debug (fun m -> m "[`read] shift %d/%d byte(s)" shift len) ;
-      Ke.N.shift_exn flow.queue shift ;
-      if shift = 0 then Ke.compress flow.queue ;
+      We.N.shift_exn flow.queue shift ;
+      if shift = 0 then We.compress flow.queue ;
       Lwt.return `Continue
-  
+ 
   let writev ?(timeout= 1000000000L) flow iovecs =
     let sleep () = Time.sleep_ns timeout >>= fun () -> Lwt.return (Error `Timeout) in
   
@@ -102,7 +105,9 @@ module Httpaf
           flow.wr_closed <- true ;
           safely_close flow >>= fun () ->
           Lwt.return `Closed
-        | Error (`Msg err) -> Lwt.fail (Send_error err) in
+        | Error (`Msg err) ->
+          Log.err (fun m -> m "Got an error while reading: %s." err) ;
+          Lwt.fail (Send_error err) in
     go 0 iovecs
   
   let send flow iovecs =
@@ -114,7 +119,7 @@ module Httpaf
     if (not flow.rd_closed && flow.wr_closed) || (flow.rd_closed && not flow.wr_closed)
     then ( flow.rd_closed <- true
          ; flow.wr_closed <- true
-         ; Log.debug (fun m -> m "properly close the connection.\n%!")
+         ; Log.debug (fun m -> m "Properly close the connection.")
          ; Tuyau.close flow.flow >>= function
            | Ok () -> Lwt.return ()
            | Error (`Msg err) -> Lwt.fail (Close_error err) )
@@ -126,7 +131,7 @@ module Httpaf
       let connection =
         Server_connection.create ~config ~error_handler:(error_handler edn)
           (request_handler edn) in
-      let queue, _ = Ke.create ~capacity:0x1000 Bigarray.char in
+      let queue, _ = We.create ~capacity:0x1000 Bigarray.char in
       let flow =
         { flow
         ; tmp= Cstruct.create config.read_buffer_size
@@ -179,29 +184,133 @@ module Httpaf
       wr_fiber () ;
       let threads = [ rd_exit; wr_exit; ] in
       Lwt.join threads >>= fun () ->
-      Log.debug (fun m -> m "end of transmission.") ;
+      Log.debug (fun m -> m "End of transmission.") ;
       close flow in
     connection_handler
 
-  let request ?(config= Httpaf.Config.default) flow edn request ~error_handler ~response_handler =
+  module Qe = Ke.Rke
+
+  type client =
+    { flow  : Tuyau.flow
+    ; tmp   : Cstruct.t
+    ; queue : (char, Bigarray.int8_unsigned_elt) Qe.t
+    ; mutable rd_closed : bool
+    ; mutable wr_closed : bool }
+
+  let safely_close flow =
+    if flow.rd_closed && flow.wr_closed
+    then
+      ( Log.debug (fun m -> m "Close the connection.")
+      ; Tuyau.close flow.flow >>= function
+      | Error (`Msg err) -> Lwt.fail (Close_error err)
+      | Ok () -> Lwt.return () )
+    else Lwt.return ()
+
+  let rec recv flow ~read ~read_eof =
+    match Qe.N.peek flow.queue with
+    | [] ->
+      if flow.rd_closed
+      then ( let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in Lwt.return `Closed )
+      else
+        let len = (Cstruct.len flow.tmp) in
+        let raw = Cstruct.sub flow.tmp 0 len in
+        ( Tuyau.recv flow.flow raw >>= function
+            | Error (`Msg err) -> Lwt.fail (Recv_error err)
+            | Ok `End_of_input ->
+              let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
+              Log.debug (fun m -> m "[`read] Connection closed.") ;
+              flow.rd_closed <- true ;
+              safely_close flow >>= fun () -> Lwt.return `Closed
+            | Ok (`Input len) ->
+              Log.debug (fun m -> m "<- %d byte(s)" len) ;
+              Qe.N.push flow.queue ~blit ~length:Cstruct.len ~off:0 ~len raw ;
+              recv flow ~read ~read_eof )
+    | src :: _ ->
+      let len = Bigstringaf.length src in
+      Log.debug (fun m -> m "transmit %d byte(s)" len) ;
+      let shift = read src ~off:0 ~len in
+      Log.debug (fun m -> m "[`read] shift %d/%d byte(s)" shift len) ;
+      Qe.N.shift_exn flow.queue shift ;
+      if shift = 0 then Qe.compress flow.queue ;
+      Lwt.return `Continue
+
+  let drain flow ~read:_ ~read_eof =
+    let go () = match Qe.N.peek flow.queue with
+      | [] ->
+        Log.debug (fun m -> m "[`drain] empty queue.") ;
+        let _ = read_eof Bigstringaf.empty ~off:0 ~len:0 in
+        Lwt.return ()
+      | src :: _ ->
+        Log.debug (fun m -> m "[`drain] %d byte(s)." (Bigstringaf.length src)) ;
+        let _ = read_eof src ~off:0 ~len:(Bigstringaf.length src) in
+        Lwt.return () in
+    Qe.compress flow.queue ; go ()
+
+  let writev ?(timeout= 1000000000L) flow iovecs =
+    let sleep () = Time.sleep_ns timeout >>= fun () -> Lwt.return (Error `Timeout) in
+  
+    let rec go n = function
+      | [] -> Lwt.return (`Ok n)
+      | { Faraday.buffer; off; len; } :: rest ->
+        let raw = Cstruct.of_bigarray buffer ~off ~len in
+        Lwt.pick
+          [ Tuyau.send flow.flow raw
+          ; sleep () ] >>= function
+        | Ok shift ->
+          if shift = len
+          then go (n + shift) rest
+          else go (n + shift) ({ Faraday.buffer; off= off + shift; len= len - shift; } :: rest)
+        | Error `Timeout ->
+          flow.wr_closed <- true ;
+          safely_close flow >>= fun () ->
+          Lwt.return `Closed
+        | Error (`Msg err) ->
+          Log.err (fun m -> m "Got an error while reading: %s." err) ;
+          Lwt.fail (Send_error err) in
+    go 0 iovecs
+
+  let close flow =
+    if (not flow.rd_closed && flow.wr_closed) || (flow.rd_closed && not flow.wr_closed)
+    then ( flow.rd_closed <- true
+         ; flow.wr_closed <- true
+         ; Log.debug (fun m -> m "Properly close the connection.")
+         ; Tuyau.close flow.flow >>= function
+           | Ok () -> Lwt.return ()
+           | Error (`Msg err) -> Lwt.fail (Close_error err) )
+    else Lwt.return ()
+  
+  let request
+      ?(handshake= fun _ -> false)
+      ?(config= Httpaf.Config.default) flow edn request ~error_handler ~response_handler =
     let module Client_connection = Httpaf.Client_connection in
     let request_body, connection =
       Client_connection.request ~config request
         ~error_handler:(error_handler edn)
         ~response_handler:(response_handler edn) in
-    let queue, _ = Ke.create ~capacity:0x1000 Bigarray.char in
+    let queue = Qe.create ~capacity:config.read_buffer_size Bigarray.char in
     let tmp = Cstruct.create config.read_buffer_size in
     let flow = { flow; queue; tmp; rd_closed= false; wr_closed= false; } in
     let read_loop_exited, notify_read_loop_exited = Lwt.wait () in
+    let condition_handshake = Lwt_condition.create () in
+
+    let rec await () =
+      if handshake ()
+      then Lwt_condition.wait condition_handshake >>= await
+      else Lwt.return () in
 
     let rd_loop () =
-      let rec go () =
+      let rec go () = await () >>= fun () ->
         match Client_connection.next_read_operation connection with
         | `Read ->
+          Log.debug (fun m -> m "[`read] start to read.") ;
           let read = Client_connection.read connection in
           let read_eof = Client_connection.read_eof connection in
           recv flow ~read ~read_eof >>= fun _ -> go ()
         | `Close ->
+          Log.debug (fun m -> m "[`read] close the connection.") ;
+          let read = Client_connection.read connection in
+          let read_eof = Client_connection.read_eof connection in
+          drain flow ~read ~read_eof >>= fun () ->
           Lwt.wakeup_later notify_read_loop_exited () ;
           flow.rd_closed <- true ;
           safely_close flow in
@@ -216,13 +325,19 @@ module Httpaf
       let rec go () =
         match Client_connection.next_write_operation connection with
         | `Write iovecs ->
+          Log.debug (fun m -> m "[`write] start to write.") ;
           writev iovecs >>= fun res ->
+          Lwt_condition.signal condition_handshake () ;
           Client_connection.report_write_result connection res ;
           go ()
         | `Yield ->
+          Log.debug (fun m -> m "[`write] yield.") ;
+          Lwt_condition.signal condition_handshake () ;
           Client_connection.yield_writer connection wr_loop ;
           Lwt.return ()
         | `Close _ ->
+          Log.debug (fun m -> m "[`write] close.") ;
+          Lwt_condition.broadcast condition_handshake () ;
           Lwt.wakeup_later notify_write_loop_exited () ;
           Lwt.return () in
 
@@ -233,11 +348,8 @@ module Httpaf
     rd_loop () ; wr_loop () ;
     Lwt.async (fun () ->
         Lwt.join [ read_loop_exited; write_loop_exited ] >>= fun () ->
-        if (not flow.rd_closed && flow.wr_closed) || (flow.rd_closed && not flow.wr_closed)
-        then Tuyau.close flow.flow >>= function
-          | Error (`Msg err) -> Lwt.fail (Close_error err)
-          | Ok () -> Lwt.return ()
-        else Lwt.return ()) ;
+        Log.debug (fun m -> m "End of transmission.") ;
+        close flow) ;
     request_body
 end
 
@@ -256,18 +368,20 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
     | Ok x -> f x
     | Error err -> Lwt.return (Error err)
 
+  include Httpaf
+
   let http ?config ~error_handler ~request_handler master =
     Tuyau_mirage.impl_of_service ~key:TCP.configuration TCP.service |> Lwt.return >>? fun (module Service) ->
     Tuyau_mirage.impl_of_protocol ~key:TCP.endpoint TCP.protocol |> Lwt.return >>? fun (module Protocol) ->
     let handler edn flow =
-      Httpaf.create_server_connection_handler ?config ~error_handler ~request_handler edn flow in
+      create_server_connection_handler ?config ~error_handler ~request_handler edn flow in
     let rec go () =
       let open Lwt.Infix in
       Service.accept master >>= function
       | Error err -> Lwt.return (Rresult.R.error_msgf "%a" Service.pp_error err)
       | Ok flow ->
         let edn = TCP.dst flow in
-        Lwt.async (fun () -> handler edn (Tuyau_mirage.Flow (flow, (module Protocol)))) ; Lwt.pause () >>= go in
+        Lwt.async (fun () -> handler edn (Tuyau_mirage.abstract TCP.protocol flow)) ; Lwt.pause () >>= go in
     go ()
 
   let https ?config ~error_handler ~request_handler master =
@@ -275,20 +389,30 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
     Tuyau_mirage.impl_of_service ~key:tls_configuration tls_service |> Lwt.return >>? fun (module Service) ->
     Tuyau_mirage.impl_of_protocol ~key:tls_endpoint tls_protocol |> Lwt.return >>? fun (module Protocol) ->
     let handler edn flow =
-      Httpaf.create_server_connection_handler ?config ~error_handler ~request_handler edn flow in
+      create_server_connection_handler ?config ~error_handler ~request_handler edn flow in
     let rec go () =
       let open Lwt.Infix in
       Service.accept master >>= function
       | Error err -> Lwt.return (Rresult.R.error_msgf "%a" Service.pp_error err)
       | Ok flow ->
         let edn = TCP.dst (Tuyau_mirage_tls.underlying flow) in
-        Lwt.async (fun () -> handler edn (Tuyau_mirage.Flow (flow, (module Protocol)))) ; Lwt.pause () >>= go in
+        Lwt.async (fun () -> handler edn (Tuyau_mirage.abstract tls_protocol flow)) ; Lwt.pause () >>= go in
     go ()
 
-  let request ?config ~resolvers ~error_handler ~response_handler domain_name request =
-    Tuyau_mirage.flow resolvers domain_name >|= function
+  let request ?key ?config ~resolvers ~error_handler ~response_handler domain_name v =
+    Tuyau_mirage.flow ?key resolvers domain_name >|= function
     | Error _ as err -> err
     | Ok flow ->
-      let body = Httpaf.request ?config flow domain_name request ~error_handler ~response_handler in
-      Ok body
+      match Tuyau_mirage.is flow tls_protocol with
+      | Some tls ->
+        let handshake () = Tuyau_mirage_tls.handshake tls in
+        let ip, port = TCP.dst (Tuyau_mirage_tls.underlying tls) in
+        Ok (request ~handshake ?config flow (Some (ip, port)) v ~error_handler ~response_handler)
+      | None ->
+        match Tuyau_mirage.is flow TCP.protocol with
+        | Some protocol ->
+          let ip, port = TCP.dst protocol in
+          Ok (request ?config flow (Some (ip, port)) v ~error_handler ~response_handler)
+        | None -> 
+          Ok (request ?config flow None v ~error_handler ~response_handler)
 end
