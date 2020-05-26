@@ -12,6 +12,12 @@ synopsis:     "HTTP/AF port to MirageOS and tuyau"
 build: [ "dune" "build" "-p" name "-j" jobs ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
+pin-depends: [
+  "conduit" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0"
+  "conduit-tls" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0"
+  "conduit-mirage" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0"
+]
+
 depends: [
   "ocaml"       {>= "4.07.0"}
   "dune"

@@ -1,6 +1,6 @@
 open Mirage
 
-let pin_conduit = "git+https://github.com/mirage/ocaml-conduit.git#3.0.0"
+let pin_conduit = "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0"
 
 type conduit = Conduit
 let conduit = Type Conduit
