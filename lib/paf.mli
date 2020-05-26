@@ -8,8 +8,11 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) : sig
   exception Recv_error  of string
   exception Close_error of string
 
-  val tls_endpoint : (TCP.endpoint * Tls.Config.client) key
-  val tls_configuration : (TCP.configuration * Tls.Config.server) key
+  type tcp_endpoint = (StackV4.t, Ipaddr.V4.t) Conduit_mirage_tcp.endpoint
+  type tcp_configuration = StackV4.t Conduit_mirage_tcp.configuration
+
+  val tls_endpoint : (tcp_endpoint * Tls.Config.client) key
+  val tls_configuration : (tcp_configuration * Tls.Config.server) key
 
   val tls_protocol : TCP.protocol protocol_with_tls Witness.protocol
   val tls_service : (TCP.service service_with_tls * TCP.protocol protocol_with_tls) Witness.service
@@ -33,7 +36,7 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) : sig
     -> resolvers:Conduit.resolvers
     -> error_handler:(Conduit_mirage.flow -> (Ipaddr.V4.t * int) option -> Httpaf.Client_connection.error_handler)
     -> response_handler:((Ipaddr.V4.t * int) option -> Httpaf.Client_connection.response_handler)
-    -> [ `raw ] Domain_name.t
+    -> [ `host ] Domain_name.t
     -> Httpaf.Request.t
     -> ([ `write ] Httpaf.Body.t, [> Conduit_mirage.error ]) result Lwt.t
 end

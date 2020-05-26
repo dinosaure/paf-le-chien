@@ -2,7 +2,8 @@
  (name paf)
  (public_name paf)
  (modules paf)
- (libraries mirage-time ke httpaf tuyau-tls
+ (libraries mirage-time ke httpaf
+    conduit-tls
     conduit-mirage
     conduit-mirage.tcp
     conduit-mirage.tls))

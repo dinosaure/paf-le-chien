@@ -393,6 +393,9 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
   module TCP = Conduit_mirage_tcp.Make(StackV4)
   module Httpaf = Httpaf(Conduit_mirage)(Time)
 
+  type tcp_endpoint = (StackV4.t, Ipaddr.V4.t) Conduit_mirage_tcp.endpoint
+  type tcp_configuration = StackV4.t Conduit_mirage_tcp.configuration
+
   let tls_endpoint, tls_protocol =
     Conduit_mirage_tls.protocol_with_tls ~key:TCP.endpoint TCP.protocol
   let tls_configuration, tls_service =
