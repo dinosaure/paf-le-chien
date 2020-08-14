@@ -6,7 +6,7 @@ let reporter ppf =
         Logs_fmt.pp_header (level, header)
         Fmt.(styled `Magenta string) (Logs.Src.name src) in
     msgf @@ fun ?header ?tags fmt -> with_metadata header tags k ppf fmt in
-  { Logs.report } 
+  { Logs.report }
 
 let () = Mirage_crypto_rng_unix.initialize ()
 let () = Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true ()
@@ -104,8 +104,8 @@ let run uri =
     let hostname = Domain_name.(host_exn <.> of_string_exn) hostname in
     let request = Httpaf.Request.create ~headers `GET (Uri.path uri) in
     let response_handler = response_handler th_err ~f in
-    let resolvers = Conduit_mirage.register_resolver ~key:Paf.tls_endpoint (https_resolver ?port stack) Conduit.empty in
-    Paf.request ~key:Paf.tls_endpoint
+    let resolvers = Conduit_mirage.add Paf.tls_protocol (https_resolver ?port stack) Conduit.empty in
+    Paf.request
       ~resolvers
       ~error_handler:(error_handler wk_err)
       ~response_handler
@@ -120,8 +120,8 @@ let run uri =
     let hostname = Domain_name.(host_exn <.> of_string_exn) hostname in
     let request = Httpaf.Request.create ~headers `GET (Uri.path uri) in
     let response_handler = response_handler th_err ~f in
-    let resolvers = Conduit_mirage.register_resolver ~key:Paf.TCP.endpoint (http_resolver ?port stack) Conduit.empty in
-    Paf.request ~key:Paf.TCP.endpoint
+    let resolvers = Conduit_mirage.add Paf.TCP.protocol (http_resolver ?port stack) Conduit.empty in
+    Paf.request
       ~resolvers
       ~error_handler:(error_handler wk_err)
       ~response_handler

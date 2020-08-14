@@ -1,3 +1,5 @@
+module Conduit_mirage_tls = Conduit_tls.Make (Lwt) (Conduit_mirage)
+
 module type HTTPAF = sig
   type flow
 
@@ -25,7 +27,7 @@ module type HTTPAF = sig
 end
 
 module Httpaf
-    (Conduit : Conduit.S with type 'a s = 'a Lwt.t
+    (Conduit : Conduit.S with type 'a io = 'a Lwt.t
                           and type input = Cstruct.t
                           and type output = Cstruct.t)
     (Time : Mirage_time.S) : HTTPAF with type flow = Conduit.flow = struct
@@ -56,6 +58,7 @@ module Httpaf
     then
       ( Log.debug (fun m -> m "Close the connection.")
       ; Conduit.close flow.flow >>= function
+      | Error `Not_found -> assert false
       | Error (`Msg err) ->
         Log.err (fun m -> m "Got an error when closing: %s" err) ;
         Lwt.fail (Close_error err)
@@ -75,7 +78,8 @@ module Httpaf
               flow.rd_closed <- true ;
               safely_close flow >>= fun () ->
               Lwt.fail (Recv_error err)
-            | Ok `End_of_input ->
+            | Error `Not_found -> assert false
+            | Ok `End_of_flow ->
               let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
               Log.debug (fun m -> m "[`read] Connection closed.") ;
               flow.rd_closed <- true ;
@@ -114,7 +118,8 @@ module Httpaf
           Log.err (fun m -> m "Got an error while writing: %s." err) ;
           flow.wr_closed <- true ;
           safely_close flow >>= fun () ->
-          Lwt.fail (Send_error err) in
+          Lwt.fail (Send_error err)
+        | Error `Not_found -> assert false in
     go 0 iovecs
   
   let send flow iovecs =
@@ -131,6 +136,7 @@ module Httpaf
            | Ok () ->
              Log.debug (fun m -> m "Connection closed.") ;
              Lwt.return ()
+           | Error `Not_found -> assert false
            | Error (`Msg err) ->
              Log.err (fun m -> m "Got an error when closing: %s." err) ;
              Lwt.fail (Close_error err) )
@@ -214,6 +220,7 @@ module Httpaf
     then
       ( Log.debug (fun m -> m "Close the connection.")
       ; Conduit.close flow.flow >>= function
+      | Error `Not_found -> assert false
       | Error (`Msg err) ->
         Log.err (fun m -> m "Got an error when closing: %s" err) ;
         Lwt.fail (Close_error err)
@@ -227,17 +234,43 @@ module Httpaf
     | Some mutex -> fun f -> Lwt_mutex.with_lock mutex f
     | None -> no_lock
 
-  let rec recv ?tls flow ~read ~read_eof =
+  let rec really_recv ?tls flow ~read ~read_eof =
+    let len = (Cstruct.len flow.tmp) in
+    let raw = Cstruct.sub flow.tmp 0 len in
+    ( with_lock ?mutex:tls (fun () ->
+          Lwt.catch (fun () -> Conduit.recv flow.flow raw) 
+          (fun exn -> Lwt.return_error (`Exn exn))) >>= function
+        | Error `Not_found -> assert false
+        | Error (`Exn _) ->
+          flow.rd_closed <- true ;
+          safely_close flow >>= fun () -> Lwt.return `Closed
+        | Error (`Msg _) ->
+          flow.rd_closed <- true ;
+          safely_close flow >>= fun () -> Lwt.return `Closed
+          (* Lwt.fail (Recv_error err) *)
+        | Ok `End_of_flow ->
+          let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
+          Log.debug (fun m -> m "[`read] Connection closed.") ;
+          flow.rd_closed <- true ;
+          safely_close flow >>= fun () -> Lwt.return `Closed
+        | Ok (`Input len) ->
+          Log.debug (fun m -> m "<- %d byte(s)" len) ;
+          Qe.N.push flow.queue ~blit ~length:Cstruct.len ~off:0 ~len raw ;
+          recv ?tls flow ~read ~read_eof )
+
+  and recv ?tls flow ~read ~read_eof =
     match Qe.N.peek flow.queue with
     | [] ->
       if flow.rd_closed
       then ( let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in Lwt.return `Closed )
-      else
+      else really_recv ?tls flow ~read ~read_eof
+        (*
         let len = (Cstruct.len flow.tmp) in
         let raw = Cstruct.sub flow.tmp 0 len in
         ( with_lock ?mutex:tls (fun () ->
               Lwt.catch (fun () -> Conduit.recv flow.flow raw) 
               (fun exn -> Lwt.return_error (`Exn exn))) >>= function
+            | Error `Not_found -> assert false
             | Error (`Exn _) ->
               flow.rd_closed <- true ;
               safely_close flow >>= fun () -> Lwt.return `Closed
@@ -245,7 +278,7 @@ module Httpaf
               flow.rd_closed <- true ;
               safely_close flow >>= fun () -> Lwt.return `Closed
               (* Lwt.fail (Recv_error err) *)
-            | Ok `End_of_input ->
+            | Ok `End_of_flow ->
               let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
               Log.debug (fun m -> m "[`read] Connection closed.") ;
               flow.rd_closed <- true ;
@@ -253,15 +286,16 @@ module Httpaf
             | Ok (`Input len) ->
               Log.debug (fun m -> m "<- %d byte(s)" len) ;
               Qe.N.push flow.queue ~blit ~length:Cstruct.len ~off:0 ~len raw ;
-              recv ?tls flow ~read ~read_eof )
+              recv ?tls flow ~read ~read_eof ) *)
     | src :: _ ->
       let len = Bigstringaf.length src in
       Log.debug (fun m -> m "transmit %d byte(s)" len) ;
       let shift = read src ~off:0 ~len in
       Log.debug (fun m -> m "[`read] shift %d/%d byte(s)" shift len) ;
       Qe.N.shift_exn flow.queue shift ;
-      if shift = 0 then Qe.compress flow.queue ;
-      Lwt.return `Continue
+      if shift = 0
+      then ( Qe.compress flow.queue ; really_recv ?tls flow ~read ~read_eof )
+      else Lwt.return `Continue
 
   let drain ?tls:_ flow ~read:_ ~read_eof =
     let go () = match Qe.N.peek flow.queue with
@@ -289,6 +323,7 @@ module Httpaf
           if shift = len
           then go (n + shift) rest
           else go (n + shift) ({ Faraday.buffer; off= off + shift; len= len - shift; } :: rest)
+        | Error `Not_found -> assert false
         | Error `Timeout ->
           flow.wr_closed <- true ;
           safely_close flow >>= fun () ->
@@ -307,6 +342,7 @@ module Httpaf
            | Ok () ->
              Log.debug (fun m -> m "Connection properly closed.") ;
              Lwt.return ()
+           | Error `Not_found -> assert false
            | Error (`Msg err) -> Lwt.fail (Close_error err) )
     else Lwt.return ()
 
@@ -393,23 +429,13 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
   module TCP = Conduit_mirage_tcp.Make(StackV4)
   module Httpaf = Httpaf(Conduit_mirage)(Time)
 
-  type tcp_endpoint = (StackV4.t, Ipaddr.V4.t) Conduit_mirage_tcp.endpoint
-  type tcp_configuration = StackV4.t Conduit_mirage_tcp.configuration
-
-  let tls_endpoint, tls_protocol =
-    Conduit_mirage_tls.protocol_with_tls ~key:TCP.endpoint TCP.protocol
-  let tls_configuration, tls_service =
-    Conduit_mirage_tls.service_with_tls ~key:TCP.configuration TCP.service tls_protocol
-
-  let ( >>? ) x f = x >>= function
-    | Ok x -> f x
-    | Error err -> Lwt.return_error err
+  let tls_protocol = Conduit_mirage_tls.protocol_with_tls TCP.protocol
+  let tls_service = Conduit_mirage_tls.service_with_tls TCP.service tls_protocol
 
   include Httpaf
 
   let http ?config ~error_handler ~request_handler master =
-    Conduit_mirage.impl_of_service ~key:TCP.configuration TCP.service |> Lwt.return >>? fun (module Service) ->
-    Conduit_mirage.impl_of_protocol ~key:TCP.endpoint TCP.protocol |> Lwt.return >>? fun (module Protocol) ->
+    let module Service = (val Conduit_mirage.Service.impl TCP.service) in
     let handler edn flow =
       create_server_connection_handler ?config ~error_handler ~request_handler edn flow in
     let rec go () =
@@ -418,13 +444,12 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
       | Error err -> Lwt.return (Rresult.R.error_msgf "%a" Service.pp_error err)
       | Ok flow ->
         let edn = TCP.dst flow in
-        Lwt.async (fun () -> handler edn (Conduit_mirage.abstract TCP.protocol flow)) ; Lwt.pause () >>= go in
+        Lwt.async (fun () -> handler edn (Conduit_mirage.pack TCP.protocol flow)) ; Lwt.pause () >>= go in
     go ()
 
   let https ?config ~error_handler ~request_handler master =
     let open Rresult in
-    Conduit_mirage.impl_of_service ~key:tls_configuration tls_service |> Lwt.return >>? fun (module Service) ->
-    Conduit_mirage.impl_of_protocol ~key:tls_endpoint tls_protocol |> Lwt.return >>? fun (module Protocol) ->
+    let module Service = (val Conduit_mirage.Service.impl tls_service) in
     let handler edn flow =
       create_server_connection_handler ?config ~error_handler ~request_handler edn flow in
     let rec go () =
@@ -433,17 +458,17 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) = struct
       | Error err -> Lwt.return (Rresult.R.error_msgf "%a" Service.pp_error err)
       | Ok flow ->
         let edn = TCP.dst (Conduit_mirage_tls.underlying flow) in
-        Lwt.async (fun () -> handler edn (Conduit_mirage.abstract tls_protocol flow)) ; Lwt.pause () >>= go in
+        Lwt.async (fun () -> handler edn (Conduit_mirage.pack tls_protocol flow)) ; Lwt.pause () >>= go in
     go ()
 
   let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
 
-  let request ?key ?config ~resolvers ~error_handler ~response_handler domain_name v =
-    Conduit_mirage.flow ?key resolvers domain_name >>= function
+  let request ?config ~resolvers ~error_handler ~response_handler domain_name v =
+    Conduit_mirage.resolve resolvers domain_name >>= function
     | Error _ as err -> Lwt.return err
     | Ok flow ->
-      match Conduit_mirage.is flow tls_protocol,
-            Conduit_mirage.is flow TCP.protocol with
+      match Conduit_mirage.cast flow tls_protocol,
+            Conduit_mirage.cast flow TCP.protocol with
       | Some tls, None ->
         let ip, port = TCP.dst (Conduit_mirage_tls.underlying tls) in
         Lwt.return_ok (request ~tls:true ?config flow (Some (ip, port)) v ~error_handler ~response_handler)

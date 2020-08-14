@@ -8,6 +8,8 @@ let reporter ppf =
     msgf @@ fun ?header ?tags fmt -> with_metadata header tags k ppf fmt in
   { Logs.report } 
 
+let sigpipe = 13
+
 let () = Mirage_crypto_rng_unix.initialize ()
 
 (*
@@ -15,6 +17,8 @@ let () = Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true ()
 let () = Logs.set_reporter (reporter Fmt.stdout)
 let () = Logs.set_level ~all:true (Some Logs.Debug)
 *)
+
+let () = Sys.set_signal sigpipe Sys.Signal_ignore
 
 module Paf = Paf.Make(Time)(Tcpip_stack_socket)
 module Ke = Ke.Rke
@@ -110,7 +114,15 @@ let error_handler (ip, port) ?request:_ error respond =
     let body = respond headers in
     Body.write_string body contents ;
     Body.close_writer body
-  | _ -> ()
+  | `Exn exn ->
+    Fmt.epr "Got an exception: %s.\n%!" (Printexc.to_string exn) ;
+    Printexc.print_backtrace stderr
+  | `Bad_gateway ->
+    Fmt.epr "Got a bad gateway error.\n%!"
+  | `Bad_request ->
+    Fmt.epr "Got a bad request error.\n%!"
+  | `Internal_server_error ->
+    Fmt.epr "Got an internal server error.\n%!" ;
 
 open Lwt.Infix
 
@@ -119,11 +131,10 @@ let ( >>? ) x f = x >>= function
   | Error _ as err -> Lwt.return err
 
 let server_http large stack =
-  Conduit_mirage.serve
-    ~key:Paf.TCP.configuration
+  Conduit_mirage.Service.init
     { Conduit_mirage_tcp.stack; keepalive= None; nodelay= false
     ; port= 8080; }
-    ~service:Paf.TCP.service >>? fun (master, _) ->
+    ~service:Paf.TCP.service >>? fun master ->
   Paf.http ~error_handler ~request_handler:(request_handler large) master
 
 let load_file filename =
@@ -140,11 +151,10 @@ let server_https cert key large stack =
         X509.Private_key.decode_pem key with
   | Ok certs, Ok (`RSA key) ->
     let config = Tls.Config.server ~certificates:(`Single (certs, key)) () in
-    Conduit_mirage.serve
-      ~key:Paf.tls_configuration
+    Conduit_mirage.Service.init
       ({ Conduit_mirage_tcp.stack; keepalive= None; nodelay= false
        ; port= 4343; }, config)
-      ~service:Paf.tls_service >>? fun (master, _) ->
+      ~service:Paf.tls_service >>? fun master ->
     Paf.https ~error_handler ~request_handler:(request_handler large) master
   | _ -> invalid_arg "Invalid certificate or key"
 
