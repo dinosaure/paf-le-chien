@@ -13,9 +13,9 @@ build: [ "dune" "build" "-p" name "-j" jobs ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
 pin-depends: [
-  [ "conduit.dev" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
-  [ "conduit-tls.dev" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
-  [ "conduit-mirage.dev" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
+  [ "conduit.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
+  [ "conduit-tls.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
+  [ "conduit-mirage.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
 ]
 
 depends: [
