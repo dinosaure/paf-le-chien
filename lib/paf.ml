@@ -96,7 +96,7 @@ module Httpaf
       if shift = 0 then We.compress flow.queue ;
       Lwt.return `Continue
  
-  let writev ?(timeout= 1000000000L) flow iovecs =
+  let writev ?(timeout= 5_000_000_000L) flow iovecs =
     let sleep () = Time.sleep_ns timeout >>= fun () -> Lwt.return (Error `Timeout) in
   
     let rec go n = function
