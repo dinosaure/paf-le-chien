@@ -1,9 +1,11 @@
 (executable
  (name simple_server)
  (modules simple_server)
- (libraries logs.fmt fmt.tty mirage-crypto-rng.unix mirage-time-unix tcpip.stack-socket paf))
+ (libraries logs.fmt fmt.tty mirage-crypto-rng.unix mirage-time-unix
+   tcpip.stack-socket paf))
 
 (executable
  (name simple_client)
  (modules simple_client)
- (libraries ptime.clock.os logs.fmt fmt.tty uri mirage-crypto-rng.unix mirage-time-unix tcpip.stack-socket paf))
+ (libraries ptime.clock.os logs.fmt fmt.tty uri mirage-crypto-rng.unix
+   mirage-time-unix tcpip.stack-socket paf))

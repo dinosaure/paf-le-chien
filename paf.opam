@@ -1,5 +1,5 @@
 opam-version: "2.0"
-name:         "tuyau"
+name:         "paf"
 maintainer:   "Romain Calascibetta <romain.calascibetta@gmail.com>"
 authors:      "Romain Calascibetta <romain.calascibetta@gmail.com>"
 homepage:     "https://github.com/dinosaure/paf-le-chien"
@@ -7,15 +7,15 @@ bug-reports:  "https://github.com/dinosaure/paf-le-chien/issues"
 dev-repo:     "git+https://github.com/dinosaure/paf-le-chien.git"
 doc:          "https://dinosaure.github.io/paf-le-chien/"
 license:      "MIT"
-synopsis:     "HTTP/AF port to MirageOS and tuyau"
+synopsis:     "HTTP/AF port to MirageOS and conduit"
 
 build: [ "dune" "build" "-p" name "-j" jobs ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
 pin-depends: [
-  [ "conduit.dev" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
-  [ "conduit-tls.dev" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
-  [ "conduit-mirage.dev" "https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
+  [ "conduit.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
+  [ "conduit-tls.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
+  [ "conduit-mirage.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
 ]
 
 depends: [
@@ -24,6 +24,7 @@ depends: [
   "conduit"        {pinned}
   "conduit-tls"    {pinned}
   "conduit-mirage" {pinned}
+  "mirage-stack"
   "mirage-time"
   "httpaf"
   "ke"
