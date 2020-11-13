@@ -12,20 +12,23 @@ synopsis:     "HTTP/AF port to MirageOS and conduit"
 build: [ "dune" "build" "-p" name "-j" jobs ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
-pin-depends: [
-  [ "conduit.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
-  [ "conduit-tls.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
-  [ "conduit-mirage.dev" "git+https://github.com/dinosaure/ocaml-conduit.git#3.0.0" ]
-]
-
 depends: [
-  "ocaml"          {>= "4.07.0"}
-  "dune"
-  "conduit"        {pinned}
-  "conduit-tls"    {pinned}
-  "conduit-mirage" {pinned}
+  "ocaml"             {>= "4.08.0"}
+  "dune"              {>= "2.0.0"}
+  "conduit"           {>= "3.0.0"}
+  "conduit-tls"       {>= "3.0.0"}
+  "conduit-mirage"    {>= "3.0.0"}
   "mirage-stack"
   "mirage-time"
   "httpaf"
-  "ke"
+  "ke"                {>= "0.4"}
+  "lwt"               {with-test}
+  "base-unix"         {with-test}
+  "logs"              {with-test}
+  "fmt"               {with-test}
+  "mirage-crypto-rng" {with-test}
+  "tcpip"             {with-test}
+  "mirage-time-unix"  {with-test}
+  "ptime"             {with-test}
+  "uri"               {with-test}
 ]
