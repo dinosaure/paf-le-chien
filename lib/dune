@@ -5,8 +5,8 @@
  (libraries mirage-time mirage-stack ke httpaf conduit-tls conduit-mirage
    conduit-mirage.tcp))
 
-(library
- (name mirage_paf)
- (public_name paf.mirage)
- (modules mirage_paf)
- (libraries mirage))
+; (library
+;  (name mirage_paf)
+;  (public_name paf.mirage)
+;  (modules mirage_paf)
+;  (libraries mirage))

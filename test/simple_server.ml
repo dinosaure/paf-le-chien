@@ -46,8 +46,7 @@ let getline queue =
       Some (Bytes.unsafe_to_string tmp)
   | None -> None
 
-let http_large filename (ip, port) ic oc =
-  Fmt.pr "<%a:%d> wants to receive large file.\n%!" Ipaddr.V4.pp ip port ;
+let http_large filename (_ip, _port) ic oc =
   let open Httpaf in
   Body.close_reader ic ;
   let ic = open_in filename in
@@ -62,7 +61,7 @@ let http_large filename (ip, port) ic oc =
   go () ;
   close_in ic
 
-let http_ping_pong (ip, port) ic oc =
+let http_ping_pong (_ip, _port) ic oc =
   let open Httpaf in
   let open Lwt.Infix in
   let closed = ref false and queue = Ke.create ~capacity:0x1000 Bigarray.char in
@@ -71,7 +70,6 @@ let http_ping_pong (ip, port) ic oc =
     Bigstringaf.blit src ~src_off dst ~dst_off ~len in
   let on_eof () = closed := true in
   let rec on_read buf ~off ~len =
-    Fmt.epr "-> transmit %d byte(s).\n%!" len ;
     Ke.N.push queue ~blit ~length:Bigstringaf.length buf ~off ~len ;
     Body.schedule_read ic ~on_eof ~on_read in
   Body.schedule_read ic ~on_eof ~on_read ;
@@ -84,12 +82,10 @@ let http_ping_pong (ip, port) ic oc =
     | false, Some "pong" ->
         Body.write_string oc "ping\n" ;
         go ()
-    | false, Some line ->
-        Fmt.pr "<%a:%d> gaves a wrong line: %S.\n%!" Ipaddr.V4.pp ip port line ;
+    | false, Some _line ->
         Body.close_writer oc ;
         Lwt.return_unit
     | true, _ ->
-        Fmt.pr "<%a:%d> closed the connection.\n%!" Ipaddr.V4.pp ip port ;
         Body.close_writer oc ;
         Lwt.return_unit in
   Lwt.async go
@@ -99,7 +95,6 @@ let request_handler large (ip, port) reqd =
   let request = Reqd.request reqd in
   match request.Request.target with
   | "/" ->
-      Fmt.epr ">>> start a keep-alive connection.\n%!" ;
       let headers = Headers.of_list [ ("transfer-encoding", "chunked") ] in
       let response = Response.create ~headers `OK in
       let oc = Reqd.respond_with_streaming reqd response in
@@ -134,9 +129,7 @@ let error_handler (ip, port) ?request:_ error respond =
       let body = respond headers in
       Body.write_string body contents ;
       Body.close_writer body
-  | `Exn exn ->
-      Fmt.epr "Got an exception: %s.\n%!" (Printexc.to_string exn) ;
-      Printexc.print_backtrace stderr
+  | `Exn _exn -> Printexc.print_backtrace stderr
   | `Bad_gateway -> Fmt.epr "Got a bad gateway error.\n%!"
   | `Bad_request -> Fmt.epr "Got a bad request error.\n%!"
   | `Internal_server_error -> Fmt.epr "Got an internal server error.\n%!"
@@ -146,11 +139,22 @@ open Lwt.Infix
 let ( >>? ) x f =
   x >>= function Ok x -> f x | Error _ as err -> Lwt.return err
 
+let fd_8080 = Unix.openfile "lock.8080" Unix.[ O_CREAT; O_RDWR ] 0o644
+
+let () = at_exit (fun () -> try Unix.close fd_8080 with _exn -> ())
+
+let fd_4343 = Unix.openfile "lock.4343" Unix.[ O_CREAT; O_RDWR ] 0o644
+
+let () = at_exit (fun () -> try Unix.close fd_4343 with _exn -> ())
+
+let unlock fd = Unix.lockf fd Unix.F_ULOCK 0
+
 let server_http large stack =
   Conduit_mirage.Service.init
     { Conduit_mirage_tcp.stack; keepalive = None; nodelay = false; port = 8080 }
     ~service:Paf.TCP.service
   >>? fun master ->
+  unlock fd_8080 ;
   Paf.http ~error_handler ~request_handler:(request_handler large) master
 
 let load_file filename =
@@ -179,6 +183,7 @@ let server_https cert key large stack =
           config )
         ~service:Paf.tls_service
       >>? fun master ->
+      unlock fd_4343 ;
       Paf.https ~error_handler ~request_handler:(request_handler large) master
   | _ -> invalid_arg "Invalid certificate or key"
 
@@ -191,16 +196,12 @@ let run_http large =
   stack Ipaddr.V4.localhost >>= fun stack ->
   server_http large stack >>= function
   | Ok () -> Lwt.return_unit
-  | Error err ->
-      Fmt.epr "error: %a.\n%!" Conduit_mirage.pp_error err ;
-      Lwt.return_unit
+  | Error _err -> Lwt.return_unit
 
 let run_https cert key large =
   stack Ipaddr.V4.localhost >>= server_https cert key large >>= function
   | Ok () -> Lwt.return_unit
-  | Error err ->
-      Fmt.epr "error: %a.\n%!" Conduit_mirage.pp_error err ;
-      Lwt.return_unit
+  | Error _err -> Lwt.return_unit
 
 let () =
   match Sys.argv with
