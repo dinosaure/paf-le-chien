@@ -46,7 +46,7 @@ module Make (Time : Mirage_time.S) (StackV4 : Mirage_stack.V4) : sig
       Httpaf.Client_connection.error_handler) ->
     response_handler:
       ((Ipaddr.V4.t * int) option -> Httpaf.Client_connection.response_handler) ->
-    [ `host ] Domain_name.t ->
+    Conduit.Endpoint.t ->
     Httpaf.Request.t ->
     ([ `write ] Httpaf.Body.t, [> Conduit_mirage.error ]) result Lwt.t
 end
