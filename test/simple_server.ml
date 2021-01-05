@@ -24,7 +24,7 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let () = Sys.set_signal sigpipe Sys.Signal_ignore
 
-module Paf = Paf.Make (Time) (Tcpip_stack_socket)
+module Paf = Paf.Make (Time) (Tcpip_stack_socket.V4V6)
 module Ke = Ke.Rke
 
 let getline queue =
@@ -117,12 +117,10 @@ let request_handler large (ip, port) reqd =
 let error_handler (ip, port) ?request:_ error respond =
   let open Httpaf in
   match error with
-  | `Exn (Paf.Send_error err)
-  | `Exn (Paf.Recv_error err)
-  | `Exn (Paf.Close_error err) ->
+  | `Exn (Paf.Error err) ->
       let contents =
-        Fmt.strf "Internal server error from <%a:%d>: %s" Ipaddr.V4.pp ip port
-          err in
+        Fmt.strf "Internal server error from <%a:%d>: %a" Ipaddr.pp ip port
+          Mimic.pp_error err in
       let headers =
         Headers.of_list
           [ ("content-length", string_of_int (String.length contents)) ] in
@@ -150,12 +148,12 @@ let () = at_exit (fun () -> try Unix.close fd_4343 with _exn -> ())
 let unlock fd = Unix.lockf fd Unix.F_ULOCK 0
 
 let server_http large stack =
-  Conduit_mirage.Service.init
-    { Conduit_mirage_tcp.stack; keepalive = None; nodelay = false; port = 8080 }
-    ~service:Paf.TCP.service
-  >>? fun master ->
+  Paf.init ~port:8080 stack >>= fun service ->
+  let (`Initialized th) =
+    Paf.http ~error_handler ~request_handler:(request_handler large) service
+  in
   unlock fd_8080 ;
-  Paf.http ~error_handler ~request_handler:(request_handler large) master
+  th
 
 let load_file filename =
   let ic = open_in filename in
@@ -172,36 +170,26 @@ let server_https cert key large stack =
     (X509.Certificate.decode_pem_multiple cert, X509.Private_key.decode_pem key)
   with
   | Ok certs, Ok (`RSA key) ->
-      let config = Tls.Config.server ~certificates:(`Single (certs, key)) () in
-      Conduit_mirage.Service.init
-        ( {
-            Conduit_mirage_tcp.stack;
-            keepalive = None;
-            nodelay = false;
-            port = 4343;
-          },
-          config )
-        ~service:Paf.tls_service
-      >>? fun master ->
+      let tls = Tls.Config.server ~certificates:(`Single (certs, key)) () in
+      Paf.init ~port:4343 stack >>= fun service ->
+      let (`Initialized th) =
+        Paf.https ~tls ~error_handler ~request_handler:(request_handler large)
+          service in
       unlock fd_4343 ;
-      Paf.https ~error_handler ~request_handler:(request_handler large) master
+      th
   | _ -> invalid_arg "Invalid certificate or key"
 
-let stack ip =
-  Tcpip_stack_socket.UDPV4.connect (Some ip) >>= fun udpv4 ->
-  Tcpip_stack_socket.TCPV4.connect (Some ip) >>= fun tcpv4 ->
-  Tcpip_stack_socket.connect [ ip ] udpv4 tcpv4
+let stack =
+  Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
+    Ipaddr.V4.Prefix.global None
+  >>= fun udpv4 ->
+  Tcpip_stack_socket.V4V6.TCP.connect ~ipv4_only:false ~ipv6_only:false
+    Ipaddr.V4.Prefix.global None
+  >>= fun tcpv4 -> Tcpip_stack_socket.V4V6.connect udpv4 tcpv4
 
-let run_http large =
-  stack Ipaddr.V4.localhost >>= fun stack ->
-  server_http large stack >>= function
-  | Ok () -> Lwt.return_unit
-  | Error _err -> Lwt.return_unit
+let run_http large = stack >>= server_http large
 
-let run_https cert key large =
-  stack Ipaddr.V4.localhost >>= server_https cert key large >>= function
-  | Ok () -> Lwt.return_unit
-  | Error _err -> Lwt.return_unit
+let run_https cert key large = stack >>= server_https cert key large
 
 let () =
   match Sys.argv with
