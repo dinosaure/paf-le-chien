@@ -15,12 +15,11 @@ run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 depends: [
   "ocaml"             {>= "4.08.0"}
   "dune"              {>= "2.0.0"}
-  "conduit"           {>= "3.0.0"}
-  "conduit-tls"       {>= "3.0.0"}
-  "conduit-mirage"    {>= "3.0.0"}
   "mirage-stack"
   "mirage-time"
   "httpaf"
+  "tls-mirage"
+  "mimic"
   "ke"                {>= "0.4"}
   "lwt"               {with-test}
   "base-unix"         {with-test}
@@ -31,4 +30,8 @@ depends: [
   "mirage-time-unix"  {with-test}
   "ptime"             {with-test}
   "uri"               {with-test}
+]
+
+pin-depends: [
+  [ "mimic.dev" "git+https://github.com/mirage/ocaml-git.git#9c757989170ccf94dd74e920e6290ea85d38aca5" ]
 ]

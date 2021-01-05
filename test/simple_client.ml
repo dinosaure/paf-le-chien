@@ -6,7 +6,7 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
 
-module Paf = Paf.Make (Time) (Tcpip_stack_socket)
+module Paf = Paf.Make (Time) (Tcpip_stack_socket.V4V6)
 open Lwt.Infix
 
 let ( >>? ) x f =
@@ -35,73 +35,69 @@ let error_handler wk _ _ err =
   Lwt.wakeup_later wk
     (err :> [ `Body of string | `Done | Httpaf.Client_connection.error ]) ;
   match err with
-  | `Exn (Paf.Send_error err)
-  | `Exn (Paf.Recv_error err)
-  | `Exn (Paf.Close_error err) ->
-      failf "Impossible to start a transmission: %s" err
+  | `Exn (Paf.Error err) ->
+      failf "Impossible to start a transmission: %a" Mimic.pp_error err
   | `Invalid_response_body_length _ -> failf "Invalid response body-length"
   | `Malformed_response _ -> failf "Malformed response"
   | `Exn exn -> raise exn
 
-let http_resolver stack ?(port = 80) = function
-  | Conduit.Endpoint.IP (Ipaddr.V6 _) -> invalid_arg "Invalid IPv6 endpoint"
-  | Conduit.Endpoint.IP (Ipaddr.V4 v) ->
-      Lwt.return_some
-        {
-          Conduit_mirage_tcp.stack;
-          keepalive = None;
-          nodelay = false;
-          ip = v;
-          port;
-        }
-  | Conduit.Endpoint.Domain domain_name -> (
-      Lwt_unix.gethostbyname (Domain_name.to_string domain_name) >>= function
-      | { Unix.h_addr_list; _ } when Array.length h_addr_list > 0 ->
-          Lwt.return_some
-            {
-              Conduit_mirage_tcp.stack;
-              keepalive = None;
-              nodelay = false;
-              ip = Ipaddr_unix.V4.of_inet_addr_exn h_addr_list.(0);
-              port;
-            }
-      | _ -> Lwt.return_none)
-
 let anchors = []
 
-let authenticator _expect ~host crts =
-  let crts = X509.Validation.valid_cas crts in
-  match
-    X509.Validation.verify_chain ~host
-      ~time:(fun () -> Some (Ptime_clock.now ()))
-      ~anchors crts
-  with
-  | Ok crt -> Ok (Some ([], crt))
-  | Error _ -> Ok None
+let null =
+  let authenticator ~host:_ _ = Ok None in
+  Tls.Config.client ~authenticator ()
 
-let https_resolver stack ?(port = 443) domain_name =
-  http_resolver stack domain_name >>= function
-  | Some config ->
-      let peer_name =
-        match domain_name with
-        | Conduit.Endpoint.Domain v -> Some (Domain_name.to_string v)
-        | _ -> None in
-      let tls_config =
-        Tls.Config.client ?peer_name
-          ~authenticator:(authenticator domain_name)
-          () in
-      Lwt.return_some ({ config with port }, tls_config)
-  | None -> Lwt.return_none
+let v =
+  Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
+    Ipaddr.V4.Prefix.global None
+  >>= fun udpv4 ->
+  Tcpip_stack_socket.V4V6.TCP.connect ~ipv4_only:false ~ipv6_only:false
+    Ipaddr.V4.Prefix.global None
+  >>= fun tcpv4 -> Tcpip_stack_socket.V4V6.connect udpv4 tcpv4
 
-let stack ip =
-  Tcpip_stack_socket.UDPV4.connect (Some ip) >>= fun udpv4 ->
-  Tcpip_stack_socket.TCPV4.connect (Some ip) >>= fun tcpv4 ->
-  Tcpip_stack_socket.connect [ ip ] udpv4 tcpv4
+let stack = Mimic.make ~name:"stack"
+
+let ipaddr = Mimic.make ~name:"ipaddr"
+
+let port = Mimic.make ~name:"port"
+
+let domain_name = Mimic.make ~name:"domain-name"
+
+let tls = Mimic.make ~name:"tls"
+
+let tcp_connect stack ipaddr port = Lwt.return_some (stack, ipaddr, port)
+
+let dns_resolve domain_name =
+  match Unix.gethostbyname (Domain_name.to_string domain_name) with
+  | { Unix.h_addr_list; _ } ->
+      if Array.length h_addr_list > 0
+      then Lwt.return_some (Ipaddr_unix.of_inet_addr h_addr_list.(0))
+      else Lwt.return_none
+  | exception _ -> Lwt.return_none
+
+let tls_connect domain_name cfg stack ipaddr port =
+  Lwt.return_some (domain_name, cfg, stack, ipaddr, port)
+
+let ctx_tcp =
+  Mimic.empty
+  |> Mimic.(
+       fold Paf.tcp_edn
+         Fun.[ req stack; req ipaddr; dft port 80 ]
+         ~k:tcp_connect)
+
+let ctx_tls =
+  Mimic.empty
+  |> Mimic.(
+       fold Paf.tls_edn
+         Fun.
+           [
+             opt domain_name; dft tls null; req stack; req ipaddr; dft port 443;
+           ]
+         ~k:tls_connect)
+  |> Mimic.(fold ipaddr Fun.[ req domain_name ] ~k:dns_resolve)
 
 let run uri =
-  stack Ipaddr.V4.localhost >>= fun stack ->
   let th, wk = Lwt.wait () in
-  let port = Uri.port uri in
   let f _ body =
     Lwt.wakeup_later wk body ;
     Lwt.return () in
@@ -110,37 +106,34 @@ let run uri =
           [ `Body of string | `Done | Httpaf.Client_connection.error ] Lwt.u) )
       =
     Lwt.wait () in
-  match (Uri.scheme uri, Uri.host uri) with
-  | Some "https", Some hostname -> (
-      let headers = Httpaf.Headers.of_list [ ("Host", hostname) ] in
-      let hostname = Conduit.Endpoint.v hostname in
-      let request = Httpaf.Request.create ~headers `GET (Uri.path uri) in
-      let response_handler = response_handler th_err ~f in
-      let resolvers =
-        Conduit_mirage.add Paf.tls_protocol
-          (https_resolver ?port stack)
-          Conduit.empty in
-      Paf.request ~resolvers ~error_handler:(error_handler wk_err)
-        ~response_handler hostname request
-      >>? fun body ->
-      Httpaf.Body.close_writer body ;
-      Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
-      | `Body body -> Lwt.return_ok body
-      | _ -> Lwt.return_error (`Msg "Got an error while sending request"))
-  | Some "http", Some hostname -> (
-      let headers = Httpaf.Headers.of_list [ ("Host", hostname) ] in
-      let hostname = Conduit.Endpoint.v hostname in
-      let request = Httpaf.Request.create ~headers `GET (Uri.path uri) in
-      let response_handler = response_handler th_err ~f in
-      let resolvers =
-        Conduit_mirage.add Paf.TCP.protocol
-          (http_resolver ?port stack)
-          Conduit.empty in
-      Paf.request ~resolvers ~error_handler:(error_handler wk_err)
-        ~response_handler hostname request
-      >>? fun body ->
-      Httpaf.Body.close_writer body ;
-      Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
-      | `Body body -> Lwt.return_ok body
-      | _ -> Lwt.return_error (`Msg "Got an error while sending request"))
-  | _, _ -> failwith "Invalid uri: %a" Uri.pp uri
+  let ctx = match Uri.scheme uri with Some "https" -> ctx_tls | _ -> ctx_tcp in
+  let ctx, hostname =
+    match Uri.host uri with
+    | None -> (ctx, None)
+    | Some host ->
+    match
+      ( Ipaddr.of_string host,
+        Rresult.(Domain_name.of_string host >>= Domain_name.host) )
+    with
+    | Ok v0, Ok v1 ->
+        (ctx |> Mimic.add ipaddr v0 |> Mimic.add domain_name v1, Some host)
+    | Ok v, _ -> (ctx |> Mimic.add ipaddr v, Some host)
+    | _, Ok v -> (ctx |> Mimic.add domain_name v, Some host)
+    | _ -> (ctx, Some host) in
+  let ctx =
+    match Uri.port uri with Some v -> Mimic.add port v ctx | None -> ctx in
+  let headers =
+    Option.fold ~none:Httpaf.Headers.empty
+      ~some:(fun hostname -> Httpaf.Headers.of_list [ ("Host", hostname) ])
+      hostname in
+  let request = Httpaf.Request.create ~headers `GET (Uri.path uri) in
+  let response_handler = response_handler th_err ~f in
+  v >>= fun v ->
+  let ctx = Mimic.add stack v ctx in
+  Paf.request ~ctx ~error_handler:(error_handler wk_err) ~response_handler
+    request
+  >>? fun body ->
+  Httpaf.Body.close_writer body ;
+  Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
+  | `Body body -> Lwt.return_ok body
+  | _ -> Lwt.return_error (`Msg "Got an error while sending request")
