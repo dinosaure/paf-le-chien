@@ -12,6 +12,7 @@
 
 (library
  (name le)
+ (wrapped false)
  (public_name paf.le)
  (modules lE)
  (libraries paf.cohttp emile letsencrypt))
