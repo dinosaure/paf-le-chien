@@ -20,6 +20,9 @@ depends: [
   "httpaf"
   "tls-mirage"
   "mimic"
+  "cohttp-lwt"
+  "letsencrypt"
+  "emile"
   "ke"                {>= "0.4"}
   "lwt"               {with-test}
   "base-unix"         {with-test}
