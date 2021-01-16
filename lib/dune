@@ -4,6 +4,18 @@
  (modules paf)
  (libraries tls-mirage mirage-time mirage-stack ke httpaf mimic))
 
+(library
+ (name paf_cohttp)
+ (public_name paf.cohttp)
+ (modules paf_cohttp)
+ (libraries paf cohttp-lwt))
+
+(library
+ (name le)
+ (public_name paf.le)
+ (modules lE)
+ (libraries paf.cohttp emile letsencrypt))
+
 ; (library
 ;  (name mirage_paf)
 ;  (public_name paf.mirage)

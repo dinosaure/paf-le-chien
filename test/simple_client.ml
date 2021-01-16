@@ -63,9 +63,13 @@ let port = Mimic.make ~name:"port"
 
 let domain_name = Mimic.make ~name:"domain-name"
 
+let scheme = Mimic.make ~name:"scheme"
+
 let tls = Mimic.make ~name:"tls"
 
-let tcp_connect stack ipaddr port = Lwt.return_some (stack, ipaddr, port)
+let tcp_connect scheme stack ipaddr port = match scheme with
+  | `HTTPS -> Lwt.return_some (stack, ipaddr, port)
+  | `HTTP -> Lwt.return_none
 
 let dns_resolve domain_name =
   match Unix.gethostbyname (Domain_name.to_string domain_name) with
@@ -75,24 +79,19 @@ let dns_resolve domain_name =
       else Lwt.return_none
   | exception _ -> Lwt.return_none
 
-let tls_connect domain_name cfg stack ipaddr port =
-  Lwt.return_some (domain_name, cfg, stack, ipaddr, port)
+let tls_connect scheme domain_name cfg stack ipaddr port = match scheme with
+  | `HTTPS -> Lwt.return_some (domain_name, cfg, stack, ipaddr, port)
+  | `HTTP -> Lwt.return_none
 
-let ctx_tcp =
+let ctx =
   Mimic.empty
   |> Mimic.(
        fold Paf.tcp_edn
-         Fun.[ req stack; req ipaddr; dft port 80 ]
+         Fun.[ req scheme; req stack; req ipaddr; dft port 80 ]
          ~k:tcp_connect)
-
-let ctx_tls =
-  Mimic.empty
   |> Mimic.(
        fold Paf.tls_edn
-         Fun.
-           [
-             opt domain_name; dft tls null; req stack; req ipaddr; dft port 443;
-           ]
+         Fun.[ req scheme; opt domain_name; dft tls null; req stack; req ipaddr; dft port 443; ]
          ~k:tls_connect)
   |> Mimic.(fold ipaddr Fun.[ req domain_name ] ~k:dns_resolve)
 
@@ -106,7 +105,10 @@ let run uri =
           [ `Body of string | `Done | Httpaf.Client_connection.error ] Lwt.u) )
       =
     Lwt.wait () in
-  let ctx = match Uri.scheme uri with Some "https" -> ctx_tls | _ -> ctx_tcp in
+  let ctx = match Uri.scheme uri with
+    | Some "http" -> Mimic.add scheme `HTTP ctx
+    | Some "https" -> Mimic.add scheme `HTTPS ctx
+    | _ -> ctx in
   let ctx, hostname =
     match Uri.host uri with
     | None -> (ctx, None)

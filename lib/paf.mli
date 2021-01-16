@@ -19,6 +19,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) : sig
 
   val http :
     ?config:Httpaf.Config.t ->
+    ?stop:Lwt_switch.t ->
     error_handler:(Ipaddr.t * int -> Httpaf.Server_connection.error_handler) ->
     request_handler:(Ipaddr.t * int -> Httpaf.Server_connection.request_handler) ->
     service ->
@@ -27,6 +28,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) : sig
   val https :
     tls:Tls.Config.server ->
     ?config:Httpaf.Config.t ->
+    ?stop:Lwt_switch.t ->
     error_handler:(Ipaddr.t * int -> Httpaf.Server_connection.error_handler) ->
     request_handler:(Ipaddr.t * int -> Httpaf.Server_connection.request_handler) ->
     service ->

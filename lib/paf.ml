@@ -217,29 +217,6 @@ struct
           Lwt.return `Closed
         else
           really_recv flow ~read ~read_eof
-          (*
-        let len = (Cstruct.len flow.tmp) in
-        let raw = Cstruct.sub flow.tmp 0 len in
-        ( with_lock ?mutex:tls (fun () ->
-              Lwt.catch (fun () -> Conduit.recv flow.flow raw) 
-              (fun exn -> Lwt.return_error (`Exn exn))) >>= function
-            | Error `Not_found -> assert false
-            | Error (`Exn _) ->
-              flow.rd_closed <- true ;
-              safely_close flow >>= fun () -> Lwt.return `Closed
-            | Error (`Msg _) ->
-              flow.rd_closed <- true ;
-              safely_close flow >>= fun () -> Lwt.return `Closed
-              (* Lwt.fail (Recv_error err) *)
-            | Ok `End_of_flow ->
-              let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
-              Log.debug (fun m -> m "[`read] Connection closed.") ;
-              flow.rd_closed <- true ;
-              safely_close flow >>= fun () -> Lwt.return `Closed
-            | Ok (`Input len) ->
-              Log.debug (fun m -> m "<- %d byte(s)" len) ;
-              Qe.N.push flow.queue ~blit ~length:Cstruct.len ~off:0 ~len raw ;
-              recv ?tls flow ~read ~read_eof ) *)
     | src :: _ ->
         let len = Bigstringaf.length src in
         Log.debug (fun m -> m "transmit %d byte(s)" len) ;
@@ -410,16 +387,16 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
     let connect (domain_name, cfg, stack, ipaddr, port) =
       let t = Stack.tcp stack in
       Stack.TCP.create_connection t (ipaddr, port) >>= function
+      | Error err -> Lwt.return_error (`Read err)
       | Ok flow ->
           client_of_flow cfg
             ?host:(Option.map Domain_name.to_string domain_name)
             flow
-      | Error err -> Lwt.return_error (`Read err)
   end
 
   let tcp_edn, tcp_protocol = Mimic.register ~name:"tcp" (module TCP)
 
-  let tls_edn, tls_protocol = Mimic.register ~name:"tls" (module TLS)
+  let tls_edn, tls_protocol = Mimic.register ~priority:10 ~name:"tls" (module TLS)
 
   module Httpaf = Httpaf (Time)
   include Httpaf
@@ -505,14 +482,14 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
 
   module Tls = (val Mimic.repr tls_protocol)
 
-  let http ?config ~error_handler ~request_handler service =
+  let http ?config ?stop ~error_handler ~request_handler service =
     let handler socket =
       let ipaddr, port = Stack.TCP.dst socket in
       create_server_connection_handler ?config ~error_handler ~request_handler
         (ipaddr, port) (Tcp.T socket) in
-    serve_when_ready ~handler service
+    serve_when_ready ?stop ~handler service
 
-  let https ~tls ?config ~error_handler ~request_handler service =
+  let https ~tls ?config ?stop ~error_handler ~request_handler service =
     let handler socket =
       let ipaddr, port = Stack.TCP.dst socket in
       TLS.server_of_flow tls socket >>= function
@@ -520,7 +497,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
           create_server_connection_handler ?config ~error_handler
             ~request_handler (ipaddr, port) (Tls.T state)
       | Error _ -> Lwt.return_unit in
-    serve_when_ready ~handler service
+    serve_when_ready ?stop ~handler service
 
   let request ?config ~ctx ~error_handler ~response_handler v =
     Mimic.resolve ctx >>= function
