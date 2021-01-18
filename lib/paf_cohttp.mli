@@ -12,5 +12,14 @@ module type PAF = sig
     ([ `write ] Httpaf.Body.t, [> Mimic.error ]) result Lwt.t
 end
 
-module Make (Paf : PAF) : Cohttp_lwt.S.Client
-  with type ctx = Mimic.ctx
+module Make (Paf : PAF) : sig
+  include Cohttp_lwt.S.Client
+    with type ctx = Mimic.ctx
+
+  val scheme : [ `HTTP | `HTTPS ] Mimic.value
+  val port : int Mimic.value
+  val domain_name : [ `host ] Domain_name.t Mimic.value
+  val ipaddr : Ipaddr.t Mimic.value
+
+  val with_uri : Uri.t -> Mimic.ctx -> Mimic.ctx
+end

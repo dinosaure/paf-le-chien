@@ -54,6 +54,34 @@ module Make (Paf : PAF) = struct
   exception Invalid_response_body_length of Httpaf.Response.t
   exception Malformed_response of string
 
+  let scheme = Mimic.make ~name:"scheme"
+  let port = Mimic.make ~name:"port"
+  let domain_name = Mimic.make ~name:"domain-name"
+  let ipaddr = Mimic.make ~name:"ipaddr"
+
+  let with_uri uri ctx =
+    let scheme_v = match Uri.scheme uri with
+      | Some "http" -> Some `HTTP
+      | Some "https" -> Some `HTTPS
+      | _ -> None in
+    let port_v = match Uri.port uri, scheme_v with
+      | Some port, _ -> Some port
+      | None, Some `HTTP -> Some 80
+      | None, Some `HTTPS -> Some 443
+      | _ -> None in
+    let domain_name_v, ipaddr_v = match Uri.host uri with
+      | Some v ->
+        ( match Rresult.(Domain_name.(of_string v >>= host)), Ipaddr.of_string v with
+        | _, Ok v -> None, Some v
+        | Ok v, _ -> Some v, None
+        | _ -> None, None )
+      | _ -> None, None in
+    let ctx = Option.fold ~none:ctx ~some:(fun v -> Mimic.add scheme v ctx) scheme_v in
+    let ctx = Option.fold ~none:ctx ~some:(fun v -> Mimic.add port v ctx) port_v in
+    let ctx = Option.fold ~none:ctx ~some:(fun v -> Mimic.add ipaddr v ctx) ipaddr_v in
+    let ctx = Option.fold ~none:ctx ~some:(fun v -> Mimic.add domain_name v ctx) domain_name_v in
+    ctx
+
   let call ?(ctx= default_ctx) ?headers ?body:(cohttp_body= Cohttp_lwt.Body.empty) ?chunked:_ meth uri =
     let config = match Mimic.get httpaf_config ctx with
       | Some config -> config | None -> Httpaf.Config.default in
