@@ -83,6 +83,7 @@ module Make (Paf : PAF) = struct
     ctx
 
   let call ?(ctx= default_ctx) ?headers ?body:(cohttp_body= Cohttp_lwt.Body.empty) ?chunked:_ meth uri =
+    let ctx = with_uri uri ctx in
     let config = match Mimic.get httpaf_config ctx with
       | Some config -> config | None -> Httpaf.Config.default in
     let headers = match headers with
