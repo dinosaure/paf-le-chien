@@ -14,4 +14,11 @@ module Make
     configuration ->
     Mimic.ctx ->
     (Tls.Config.own_cert, [> `Msg of string ]) result Lwt.t
+
+  val scheme : [ `HTTP | `HTTPS ] Mimic.value
+  val port : int Mimic.value
+  val domain_name : [ `host ] Domain_name.t Mimic.value
+  val ipaddr : Ipaddr.t Mimic.value
+
+  val with_uri : Uri.t -> Mimic.ctx -> Mimic.ctx
 end

@@ -66,4 +66,6 @@ module Make (Time : Mirage_time.S) (Paf : Paf_cohttp.PAF) = struct
     let solver = Letsencrypt.Client.http_solver solver in
     Acme.sign_certificate ~ctx solver le sleep csr >|= fun certs ->
     `Single (certs, priv)
+
+  include Client
 end
