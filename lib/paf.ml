@@ -215,8 +215,7 @@ struct
         then
           let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
           Lwt.return `Closed
-        else
-          really_recv flow ~read ~read_eof
+        else really_recv flow ~read ~read_eof
     | src :: _ ->
         let len = Bigstringaf.length src in
         Log.debug (fun m -> m "transmit %d byte(s)" len) ;
@@ -346,6 +345,10 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
   open Lwt.Infix
 
   module TCP = struct
+    let src = Logs.Src.create "paf-tls"
+
+    module Log = (val Logs.src_log src : Logs.LOG)
+
     include Stack.TCP
 
     type endpoint = Stack.t * Ipaddr.t * int
@@ -369,12 +372,18 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
 
     let connect (stack, ipaddr, port) =
       let t = Stack.tcp stack in
+      Log.debug (fun m ->
+          m "Initiate a TCP connection to: %a:%d." Ipaddr.pp ipaddr port) ;
       create_connection t (ipaddr, port) >>= function
       | Ok _ as v -> Lwt.return v
       | Error err -> Lwt.return_error (`Connect err)
   end
 
   module TLS = struct
+    let src = Logs.Src.create "paf-tls"
+
+    module Log = (val Logs.src_log src : Logs.LOG)
+
     include Tls_mirage.Make (Stack.TCP)
 
     type endpoint =
@@ -386,9 +395,13 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
 
     let connect (domain_name, cfg, stack, ipaddr, port) =
       let t = Stack.tcp stack in
+      Log.debug (fun m ->
+          m "Initiate a TCP connection for TLS to: %a:%d." Ipaddr.pp ipaddr port) ;
       Stack.TCP.create_connection t (ipaddr, port) >>= function
       | Error err -> Lwt.return_error (`Read err)
       | Ok flow ->
+          Log.debug (fun m ->
+              m "Initiate a TLS connection to: %a:%d." Ipaddr.pp ipaddr port) ;
           client_of_flow cfg
             ?host:(Option.map Domain_name.to_string domain_name)
             flow
@@ -396,7 +409,8 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
 
   let tcp_edn, tcp_protocol = Mimic.register ~name:"tcp" (module TCP)
 
-  let tls_edn, tls_protocol = Mimic.register ~priority:10 ~name:"tls" (module TLS)
+  let tls_edn, tls_protocol =
+    Mimic.register ~priority:10 ~name:"tls" (module TLS)
 
   module Httpaf = Httpaf (Time)
   include Httpaf
@@ -503,6 +517,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
     Mimic.resolve ctx >>= function
     | Error _ as err -> Lwt.return err
     | Ok (Tcp.T socket as flow) ->
+        Logs.debug (fun m -> m "Connected to the peer.") ;
         let ipaddr, port = Stack.TCP.dst socket in
         Lwt.return_ok
           (request ?config flow
