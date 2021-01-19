@@ -12,6 +12,8 @@ module type PAF = sig
     ([ `write ] Httpaf.Body.t, [> Mimic.error ]) result Lwt.t
 end
 
+let ( <.> ) f g x = f (g x)
+
 module Make (Paf : PAF) = struct
   open Paf
 
@@ -120,14 +122,27 @@ module Make (Paf : PAF) = struct
       | None -> hostname in
     Httpaf.Headers.add_unless_exists headers "host" hostname
 
-  let with_transfer_encoding headers =
-    match Httpaf.Headers.get headers "content-length" with
-    | Some _ -> headers
-    | None ->
+  let with_transfer_encoding ~chunked body headers =
+    match (chunked, body, Httpaf.Headers.get headers "content-length") with
+    | (None | Some false), _, Some _ -> headers
+    | Some true, _, (Some _ | None) | None, `Stream _, None ->
+        (* XXX(dinosaure): I'm not sure that the [Some _] was right. *)
         Httpaf.Headers.add_unless_exists headers "transfer-encoding" "chunked"
+    | (None | Some false), `Empty, None ->
+        Httpaf.Headers.add_unless_exists headers "content-length" "0"
+    | (None | Some false), `String str, None ->
+        Httpaf.Headers.add_unless_exists headers "content-length"
+          (string_of_int (String.length str))
+    | (None | Some false), `Strings sstr, None ->
+        let len = List.fold_right (( + ) <.> String.length) sstr 0 in
+        Httpaf.Headers.add_unless_exists headers "content-length"
+          (string_of_int len)
+    | Some false, `Stream _, None ->
+        invalid_arg
+          "Impossible to transfer a stream with a content-length value"
 
   let call ?(ctx = default_ctx) ?headers
-      ?body:(cohttp_body = Cohttp_lwt.Body.empty) ?chunked:_ meth uri =
+      ?body:(cohttp_body = Cohttp_lwt.Body.empty) ?chunked meth uri =
     Log.debug (fun m -> m "Fill the context with %a." Uri.pp uri) ;
     let ctx = with_uri uri ctx in
     let config =
@@ -139,7 +154,7 @@ module Make (Paf : PAF) = struct
       | Some headers -> Httpaf.Headers.of_list (Cohttp.Header.to_list headers)
       | None -> Httpaf.Headers.empty in
     let headers = with_host headers uri in
-    let headers = with_transfer_encoding headers in
+    let headers = with_transfer_encoding ~chunked cohttp_body headers in
     let meth =
       match meth with
       | #Httpaf.Method.t as meth -> meth
