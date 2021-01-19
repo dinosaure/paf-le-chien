@@ -407,6 +407,10 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
             flow
   end
 
+  let src = Logs.Src.create "paf-layer"
+
+  module Log = (val Logs.src_log src : Logs.LOG)
+
   let tcp_edn, tcp_protocol = Mimic.register ~name:"tcp" (module TCP)
 
   let tls_edn, tls_protocol =
@@ -456,10 +460,10 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
           Lwt_mutex.unlock mutex ;
           accept t)
 
-  let close ({ stack; mutex; _ } as t) =
-    Lwt_mutex.with_lock mutex @@ fun () ->
-    Stack.disconnect stack >>= fun () ->
+  let close ({ stack; condition; _ } as t) =
     t.closed <- true ;
+    Stack.disconnect stack >>= fun () ->
+    Lwt_condition.signal condition () ;
     Lwt.return_unit
 
   let ( >>? ) = Lwt_result.bind
@@ -487,7 +491,11 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
          | `Timeout -> Lwt.return_ok `Timeout in
        let stop_result =
          Lwt.pick [ switched_off; loop () ] >>= function
-         | Ok (`Timeout | `Stopped) ->
+         | Ok (`Timeout | `Stopped as signal) ->
+             let pp_signal ppf = function
+               | `Timeout -> Fmt.string ppf "timeout"
+               | `Stopped -> Fmt.string ppf "stopped" in
+             Log.debug (fun m -> m "Shutdown the service (%a)." pp_signal signal) ;
              close service >>= fun () -> Lwt.return_ok ()
          | Error _ as err -> close service >>= fun () -> Lwt.return err in
        stop_result >>= function Ok () | Error `Closed -> Lwt.return_unit)
