@@ -54,8 +54,8 @@ let tls =
 
 let run_http_and_https_server ~request_handler stop =
   unix_stack () >>= fun stack ->
-  Paf.init ~port:8080 stack >>= fun http ->
-  Paf.init ~port:4343 stack >>= fun https ->
+  Paf.init ~port:9090 stack >>= fun http ->
+  Paf.init ~port:3434 stack >>= fun https ->
   let (`Initialized fiber0) =
     Paf.http ~stop ~error_handler ~request_handler http in
   let (`Initialized fiber1) =
@@ -100,7 +100,7 @@ let ctx =
              req Client.scheme;
              req stack;
              req Client.ipaddr;
-             dft Client.port 8080;
+             dft Client.port 9090;
            ]
          ~k:tcp_connect)
   |> Mimic.(
@@ -112,7 +112,7 @@ let ctx =
              dft tls null;
              req stack;
              req Client.ipaddr;
-             dft Client.port 4343;
+             dft Client.port 3434;
            ]
          ~k:tls_connect)
   |> Mimic.(fold Client.ipaddr Fun.[ req Client.domain_name ] ~k:resolver)
@@ -172,7 +172,7 @@ let test01 =
   Alcotest_lwt.test_case "simple-http" `Quick @@ fun _sw () ->
   unix_stack () >>= fun v ->
   let ctx = Mimic.add stack v ctx in
-  Client.get ~ctx (Uri.of_string "http://localhost:8080/")
+  Client.get ~ctx (Uri.of_string "http://localhost:9090/")
   >>= fun (_resp, body) ->
   Cohttp_lwt.Body.to_string body >>= fun str ->
   Alcotest.(check string) "contents" str "Hello World!" ;
@@ -183,7 +183,7 @@ let test02 =
   unix_stack () >>= fun v ->
   let ctx = Mimic.add stack v ctx in
   let body = Cohttp_lwt.Body.of_string "Hello!" in
-  Client.post ~ctx ~body (Uri.of_string "http://localhost:8080/repeat")
+  Client.post ~ctx ~body (Uri.of_string "http://localhost:9090/repeat")
   >>= fun (_resp, body) ->
   Cohttp_lwt.Body.to_string body >>= fun str ->
   Alcotest.(check string) "contents" str "Hello!" ;
@@ -193,7 +193,7 @@ let test03 =
   Alcotest_lwt.test_case "simple-https" `Quick @@ fun _sw () ->
   unix_stack () >>= fun v ->
   let ctx = Mimic.add stack v ctx in
-  Client.get ~ctx (Uri.of_string "https://localhost:4343/")
+  Client.get ~ctx (Uri.of_string "https://localhost:3434/")
   >>= fun (_resp, body) ->
   Cohttp_lwt.Body.to_string body >>= fun str ->
   Alcotest.(check string) "contents" str "Hello World!" ;
@@ -204,7 +204,7 @@ let test04 =
   unix_stack () >>= fun v ->
   let ctx = Mimic.add stack v ctx in
   let body = Cohttp_lwt.Body.of_string "Secret Hello!" in
-  Client.post ~ctx ~body (Uri.of_string "https://localhost:4343/repeat")
+  Client.post ~ctx ~body (Uri.of_string "https://localhost:3434/repeat")
   >>= fun (_resp, body) ->
   Cohttp_lwt.Body.to_string body >>= fun str ->
   Alcotest.(check string) "contents" str "Secret Hello!" ;
