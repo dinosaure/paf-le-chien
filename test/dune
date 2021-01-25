@@ -28,9 +28,21 @@
  (modules test)
  (libraries uri unix))
 
+(executable
+ (name test_cohttp)
+ (modules test_cohttp)
+ (libraries fmt.tty logs.fmt alcotest-lwt mirage-time-unix tcpip.stack-socket
+   cohttp-lwt paf.cohttp mirage-crypto-rng.unix))
+
 (rule
  (alias runtest)
  (deps server.pem server.key file.txt %{exe:clients.exe}
    %{exe:simple_server.exe})
  (action
   (run ./test.exe -c 50 -n 200)))
+
+(rule
+ (alias runtest)
+ (deps server.pem server.key %{exe:test_cohttp.exe})
+ (action
+  (run ./test_cohttp.exe --color=always)))

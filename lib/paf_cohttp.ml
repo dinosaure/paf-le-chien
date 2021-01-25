@@ -173,6 +173,7 @@ module Make (Paf : PAF) = struct
         Lwt.fail (Failure (Fmt.str "%a" Mimic.pp_error err))
     | Ok httpaf_body -> (
         transmit cohttp_body httpaf_body ;
+        Log.debug (fun m -> m "Body transmitted.") ;
         Lwt.pick
           [
             (Lwt_mvar.take mvar_res >|= fun res -> `Response res);
@@ -187,6 +188,7 @@ module Make (Paf : PAF) = struct
         | `Error (flow, _, `Malformed_response err) ->
             Mimic.close flow >>= fun () -> Lwt.fail (Malformed_response err)
         | `Response resp ->
+            Log.debug (fun m -> m "Response received.") ;
             let version =
               match resp.Httpaf.Response.version with
               | { Httpaf.Version.major = 1; minor = 0 } -> `HTTP_1_0
