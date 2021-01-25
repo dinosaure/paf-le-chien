@@ -33,4 +33,5 @@ depends: [
   "mirage-time-unix"  {with-test}
   "ptime"             {with-test}
   "uri"               {with-test}
+  "alcotest-lwt"      {with-test}
 ]
