@@ -1,7 +1,7 @@
 (library
  (name fiber)
  (modules fiber)
- (libraries lwt.unix unix))
+ (libraries fmt lwt.unix unix))
 
 (executable
  (name simple_server)
