@@ -30,10 +30,10 @@ let run uri =
 let run_client uri =
   run_process (fun () ->
       let () = Mirage_crypto_rng_unix.initialize () in
-      let () =
-        Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true () in
-      let () = Logs.set_reporter (reporter (Unix.getpid ()) Fmt.stderr) in
-      let () = Logs.set_level ~all:true (Some Logs.Debug) in
+      (* let () =
+           Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true () in
+         let () = Logs.set_reporter (reporter (Unix.getpid ()) Fmt.stderr) in
+         let () = Logs.set_level ~all:true (Some Logs.Debug) in *)
       Lwt_main.run (run uri))
 
 let const x _ = x
