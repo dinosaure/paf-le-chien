@@ -82,6 +82,8 @@ let create_process prgn =
       let oc = Unix.out_channel_of_descr out1 in
       try
         Marshal.to_channel oc (prgn ()) [ Marshal.No_sharing ] ;
+        Log.debug (fun m ->
+            m "Transmit the result of the program to the parent.") ;
         flush oc ;
         Unix.close out1 ;
         Log.debug (fun m -> m "Process ended.") ;
@@ -133,10 +135,18 @@ let run_process prgn =
   let res = Marshal.from_channel ic in
   safe_close fd ;
   match status with
-  | Unix.WEXITED 0 -> return (Ok res)
-  | Unix.WEXITED n -> return (Error n)
-  | Unix.WSIGNALED _ -> return (Error 255)
-  | Unix.WSTOPPED _ -> assert false
+  | Unix.WEXITED 0 ->
+      Log.debug (fun m -> m "%d ended properly." pid) ;
+      return (Ok res)
+  | Unix.WEXITED n ->
+      Log.err (fun m -> m "%d got an error: %d." pid n) ;
+      return (Error n)
+  | Unix.WSIGNALED _ ->
+      Log.err (fun m -> m "%d received a signal." pid) ;
+      return (Error 255)
+  | Unix.WSTOPPED _ ->
+      Log.err (fun m -> m "%d was stopped." pid) ;
+      assert false
 
 let run fiber =
   let result = ref None in
@@ -144,6 +154,7 @@ let run fiber =
   let rec loop () =
     if Hashtbl.length running > 0
     then (
+      Log.debug (fun m -> m "Waiting a process.") ;
       let pid, status = Unix.wait () in
       let ivar = Hashtbl.find running pid in
       Hashtbl.remove running pid ;

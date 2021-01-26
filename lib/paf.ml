@@ -193,8 +193,10 @@ struct
     else Lwt.return ()
 
   let rec really_recv flow ~read ~read_eof =
+    Log.debug (fun m -> m "start to really [`read].") ;
     Mimic.read flow.flow >>= function
-    | Error _err ->
+    | Error err ->
+        Log.err (fun m -> m "[`read] got an error: %a." Mimic.pp_error err) ;
         flow.rd_closed <- true ;
         safely_close flow >>= fun () -> Lwt.return `Closed
     | Ok `Eof ->
@@ -398,7 +400,11 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
       Log.debug (fun m ->
           m "Initiate a TCP connection for TLS to: %a:%d." Ipaddr.pp ipaddr port) ;
       Stack.TCP.create_connection t (ipaddr, port) >>= function
-      | Error err -> Lwt.return_error (`Read err)
+      | Error err ->
+          Log.err (fun m ->
+              m "Got an error when we try to connect (TCP) to %a:%d: %a"
+                Ipaddr.pp ipaddr port Stack.TCP.pp_error err) ;
+          Lwt.return_error (`Read err)
       | Ok flow ->
           Log.debug (fun m ->
               m "Initiate a TLS connection to: %a:%d." Ipaddr.pp ipaddr port) ;

@@ -27,7 +27,9 @@ let response_handler th_err ~f _ response body =
   Lwt.async @@ fun () ->
   Lwt.pick [ (th >|= fun () -> `Done); th_err ] >>= function
   | `Done -> f response (Buffer.contents buf)
-  | _ -> Lwt.return_unit
+  | _ ->
+      Httpaf.Body.close_reader body ;
+      Lwt.return_unit
 
 let failf fmt = Format.kasprintf (fun err -> raise (Failure err)) fmt
 
@@ -149,4 +151,6 @@ let run uri =
   Httpaf.Body.close_writer body ;
   Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
   | `Body body -> Lwt.return_ok body
-  | _ -> Lwt.return_error (`Msg "Got an error while sending request")
+  | _ ->
+      Httpaf.Body.close_writer body ;
+      Lwt.return_error (`Msg "Got an error while sending request")
