@@ -1,3 +1,7 @@
+let src = Logs.Src.create "paf"
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 type 'a t = ('a -> unit) -> unit
 
 let return x k = k x
@@ -71,17 +75,25 @@ let create_process prgn =
    * However, this code is **really bad**! You should never start an [Lwt_main.run]
    * inside a /fork/. [Lwt_unix.fork] ensures to properly clone() for a sub-lwt-process
    * but this code can easily break. *)
+  Log.debug (fun m -> m "Create a new process.") ;
   match Lwt_unix.fork () with
   | 0 -> (
       Unix.close out0 ;
       let oc = Unix.out_channel_of_descr out1 in
       try
         Marshal.to_channel oc (prgn ()) [ Marshal.No_sharing ] ;
+        Log.debug (fun m ->
+            m "Transmit the result of the program to the parent.") ;
         flush oc ;
         Unix.close out1 ;
+        Log.debug (fun m -> m "Process ended.") ;
         exit 0
-      with _ -> exit 127)
+      with exn ->
+        Log.err (fun m ->
+            m "Process ended with an exception: %s." (Printexc.to_string exn)) ;
+        exit 127)
   | pid ->
+      Log.debug (fun m -> m "%d created." pid) ;
       Unix.close out1 ;
       (out0, pid)
 
@@ -100,6 +112,7 @@ let throttle () =
   then (
     let ivar = Ivar.create () in
     Queue.push ivar waiting_for_slot ;
+    Log.debug (fun m -> m "Waiting for a new slot.") ;
     Ivar.read ivar)
   else return ()
 
@@ -117,14 +130,23 @@ let run_process prgn =
   let ivar = Ivar.create () in
   Hashtbl.add running pid ivar ;
   Ivar.read ivar >>= fun status ->
+  Log.debug (fun m -> m "%d ended." pid) ;
   let ic = Unix.in_channel_of_descr fd in
   let res = Marshal.from_channel ic in
   safe_close fd ;
   match status with
-  | Unix.WEXITED 0 -> return (Ok res)
-  | Unix.WEXITED n -> return (Error n)
-  | Unix.WSIGNALED _ -> return (Error 255)
-  | Unix.WSTOPPED _ -> assert false
+  | Unix.WEXITED 0 ->
+      Log.debug (fun m -> m "%d ended properly." pid) ;
+      return (Ok res)
+  | Unix.WEXITED n ->
+      Log.err (fun m -> m "%d got an error: %d." pid n) ;
+      return (Error n)
+  | Unix.WSIGNALED _ ->
+      Log.err (fun m -> m "%d received a signal." pid) ;
+      return (Error 255)
+  | Unix.WSTOPPED _ ->
+      Log.err (fun m -> m "%d was stopped." pid) ;
+      assert false
 
 let run fiber =
   let result = ref None in
@@ -132,6 +154,7 @@ let run fiber =
   let rec loop () =
     if Hashtbl.length running > 0
     then (
+      Log.debug (fun m -> m "Waiting a process.") ;
       let pid, status = Unix.wait () in
       let ivar = Hashtbl.find running pid in
       Hashtbl.remove running pid ;

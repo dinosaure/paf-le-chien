@@ -1,25 +1,115 @@
-## Paf le chien - An MirageOS compatible layer for [HTTP/AF][httpaf]
+## Paf le chien - A MirageOS compatible layer for [HTTP/AF][httpaf]
 
 This library wants to provide an easy way to use HTTP/AF into a unikernel. It
 implements the global /loop/ with a protocol implementation.
 
-The protocol implementation is given by [Conduit][conduit] and should be the
+The protocol implementation is given by [Mimic][mimic] and should be the
 [mirage-tcpip][mirage-tcpip] implementation - however, it can be something else.
 
 It does the composition between the TLS encryption layer and the
-[StackV4][stackv4] implementation to provide a way to initiate a TLS server.
+[StackV4V6][stackv4v6] implementation to provide a way to initiate a TLS server.
 
-It provides a client-side with the logic of Conduit and let the user to
-implement the resolution process to determine if the connection needs the TLS
-encryption layer or not.
+```ocaml
+module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
+  module Paf = Paf.make(Time)(Stack)
+
+  let start stack =
+    let* service = Paf.init ~port:80 stack in
+    let `Initialized t = Paf.http ~request_handler ~error_handler in
+    t
+end
+
+(* For UNIX with mirage-time-unix & tcpip.stack-socket *)
+
+include Make (Time) (Tcpip_stack_socket.V4V6)
+
+let stack () =
+  let open Tcpip_stack_socket.V4V6 in
+  UDP.connect ~ipv4_only:false ~ipv6_only:false Ipaddr.V4.Prefix.global None >>= fun udp ->
+  TCP.connect ~ipv4_only:false ~ipv6_only:false Ipaddr.V4.Prefix.global None >>= fun tcp ->
+  connect udp tcp
+
+let () = Lwt_main.run (stack >>= start)
+```
+
+It provides a client-side with the logic of Mimic and let the user to implement
+the resolution process to determine if the connection needs the TLS encryption
+layer or not.
+
+### Mimic
+
+Paf wants to provide an agnostic implementation of HTTP with the ability to launch
+a server or a client from an user-defined context: a `Mimic.ctx`. It does not exist
+one and unique way to use Paf because the context can be:
+- a MirageOS
+- a simple executable
+- something else like a JavaScript script (with `js_of_ocaml`)
+
+Mimic ensures the ability to gives a [Mirage_flow.S][mirage-flow] to Paf (client
+side). The underlying implementation of this /flow/ depends on what the user
+wants. It can be:
+- [ocaml-tls][ocaml-tls]
+- [lwt_ssl][lwt_ssl]
+- [mirage-tcpip][mirage-tcpip]
+- The host TCP/IP stack (see the `Unix` module)
+
+All of these choices **is not** done by Paf but must be define by the user.
+Then, the CoHTTP layer trusts on [mirage-tcpip][mirage-tcpip] and
+[ocaml-tls][ocaml-tls] to easily communicate with a peer from a given `Uri.t`.
+Even if it seems to be the easy way to do HTTP requests (over TLS or not), the
+user is able to choose some others possibilities/paths.
+
+For example, the user is able to start a connection with an Unix domain socket:
+
+```ocaml
+module Unix_domain_socket : Mimic.Mirage_protocol.S
+  with type flow = Unix.file_descr
+   and type endpoint = Fpath.t
+
+let unix_domain_socket = Mimic.register ~name:"unix-domain-socket" (module Unix_domain_socket)
+
+let ctx =
+  Mimic.add unix_domain_socket 
+    (Fpath.v "/var/my_domain.sock") Mimic.empty
+    
+let run =
+  Paf.request ~ctx ... req
+```
+
+### CoHTTP layer
+
+Paf comes with a not-fully-implemented compatible layer with CoHTTP. From this
+sub-package and the [letsencrypt][letsencrypt] package, Paf provides a process
+to download a Let's encrypt TLS certificate ready to launch an HTTPS server.
+
+```ocaml
+let cfg =
+  { LE.email= Result.to_option (Emile.of_string "romain@x25519.net")
+  ; LE.seed= None
+  ; LE.certificate_seed= None
+  ; LE.hostname= Domain_name.(host_exn (of_string_exn "x25519.net")) }
+
+let ctx = ... (* see [mimic] *)
+
+let get_tls_certificate () =
+  Lwt_switch.with_switch @@ fun stop ->
+  let* service = Paf.init ~port:80 stack in
+  let `Initialized th = Paf.http ~stop ~request_handler:LE.request_handler ~error_handler service in
+  let fiber =
+    LE.provision_certificate ~production:false cfg ctx >>= fun res ->
+    Lwt_switch.turn_off stop >>= fun () -> Lwt.return res in
+  Lwt.both (th, fiber) >>= fun (_, tls) -> Lwt.return tls
+```
 
 ### Tests & Benchmark
 
 The distribution comes with a tool which launch several clients to communicate
 with a server. We record the time spent for each request and show as the result
 the histogram of them. It's not really a benchmark as is but it a good
-stress-test to see that we don't have failure from the server.
+stress-test and we check that we don't have failure from the server.
 
 [httpaf]: https://github.com/inhabitedtype/httpaf
-[conduit]: https://github.com/mirage/ocaml-conduit
-[stackv4]: https://github.com/mirage/mirage-stack
+[mimic]: https://github.com/mirage/ocaml-git
+[mirage-tcpip]: https://github.com/mirage/mirage-tcpip
+[letsencrypt]: https://github.com/mmaker/ocaml-letsencrypt
+[stackv4v6]: https://github.com/mirage/mirage-stack

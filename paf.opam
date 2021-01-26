@@ -20,6 +20,9 @@ depends: [
   "httpaf"
   "tls-mirage"
   "mimic"
+  "cohttp-lwt"
+  "letsencrypt"
+  "emile"
   "ke"                {>= "0.4"}
   "lwt"               {with-test}
   "base-unix"         {with-test}
@@ -30,8 +33,5 @@ depends: [
   "mirage-time-unix"  {with-test}
   "ptime"             {with-test}
   "uri"               {with-test}
-]
-
-pin-depends: [
-  [ "mimic.dev" "git+https://github.com/mirage/ocaml-git.git#9c757989170ccf94dd74e920e6290ea85d38aca5" ]
+  "alcotest-lwt"      {with-test}
 ]

@@ -98,6 +98,9 @@ let () =
   let lock0, lock1, pid0, pid1 = launch_server () in
   lock lock0 ;
   lock lock1 ;
+  Unix.sleep 2 ;
+  (* XXX(dinosaure): needed because [Paf.init/Stack.listen] does not ensure that
+   * we listen **after**. Lwt can schedule it in an other way... see mirage/mirage-tcpip#438 *)
   launch_clients !concurrency !number (Uri.of_string "https://localhost:4343/") ;
   launch_clients !concurrency !number
     (Uri.of_string "https://localhost:4343/large") ;
