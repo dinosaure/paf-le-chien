@@ -417,6 +417,8 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
 
   module Log = (val Logs.src_log src : Logs.LOG)
 
+  type stack = Stack.t
+
   let tcp_edn, tcp_protocol = Mimic.register ~name:"tcp" (module TCP)
 
   let tls_edn, tls_protocol =

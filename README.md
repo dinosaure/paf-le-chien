@@ -113,3 +113,6 @@ stress-test and we check that we don't have failure from the server.
 [mirage-tcpip]: https://github.com/mirage/mirage-tcpip
 [letsencrypt]: https://github.com/mmaker/ocaml-letsencrypt
 [stackv4v6]: https://github.com/mirage/mirage-stack
+[ocaml-tls]: https://github.com/mirleft/ocaml-tls
+[lwt_ssl]: https://github.com/ocsigen/lwt_ssl
+[mirage-flow]: https://github.com/mirage/mirage-flow

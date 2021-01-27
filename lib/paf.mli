@@ -3,6 +3,8 @@
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) : sig
   exception Error of Mimic.error
 
+  type stack = Stack.t
+
   type service
   (** The type of services. *)
 
