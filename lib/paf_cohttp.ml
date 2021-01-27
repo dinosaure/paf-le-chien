@@ -1,4 +1,16 @@
 module type PAF = sig
+  type stack
+
+  val tcp_edn : (stack * Ipaddr.t * int) Mimic.value
+
+  val tls_edn :
+    ([ `host ] Domain_name.t option
+    * Tls.Config.client
+    * stack
+    * Ipaddr.t
+    * int)
+    Mimic.value
+
   val request :
     ?config:Httpaf.Config.t ->
     ctx:Mimic.ctx ->
@@ -14,7 +26,33 @@ end
 
 let ( <.> ) f g x = f (g x)
 
-module Make (Paf : PAF) = struct
+module type S = sig
+  type stack
+
+  include Cohttp_lwt.S.Client with type ctx = Mimic.ctx
+
+  val scheme : [ `HTTP | `HTTPS ] Mimic.value
+
+  val port : int Mimic.value
+
+  val domain_name : [ `host ] Domain_name.t Mimic.value
+
+  val ipaddr : Ipaddr.t Mimic.value
+
+  val tcp_edn : (stack * Ipaddr.t * int) Mimic.value
+
+  val tls_edn :
+    ([ `host ] Domain_name.t option
+    * Tls.Config.client
+    * stack
+    * Ipaddr.t
+    * int)
+    Mimic.value
+
+  val with_uri : Uri.t -> Mimic.ctx -> Mimic.ctx
+end
+
+module Make (Paf : PAF) : S with type stack = Paf.stack = struct
   open Paf
 
   let src = Logs.Src.create "paf-cohttp"
@@ -22,6 +60,8 @@ module Make (Paf : PAF) = struct
   module Log = (val Logs.src_log src : Logs.LOG)
 
   type ctx = Mimic.ctx
+
+  type stack = Paf.stack
 
   let sexp_of_ctx _ctx = assert false
 
@@ -77,6 +117,10 @@ module Make (Paf : PAF) = struct
   let domain_name = Mimic.make ~name:"domain-name"
 
   let ipaddr = Mimic.make ~name:"ipaddr"
+
+  let tcp_edn = Paf.tcp_edn
+
+  let tls_edn = Paf.tls_edn
 
   let with_uri uri ctx =
     let scheme_v =
