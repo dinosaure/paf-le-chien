@@ -24,7 +24,7 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let () = Sys.set_signal sigpipe Sys.Signal_ignore
 
-module Paf = Paf.Make (Time) (Tcpip_stack_socket.V4V6)
+module Paf = Paf.Make (Tcpip_stack_socket.V4V6)
 module Ke = Ke.Rke
 
 let getline queue =
@@ -132,6 +132,8 @@ let error_handler (ip, port) ?request:_ error respond =
   | `Bad_request -> Fmt.epr "Got a bad request error.\n%!"
   | `Internal_server_error -> Fmt.epr "Got an internal server error.\n%!"
 
+let ( <.> ) f g x = f (g x)
+
 open Lwt.Infix
 
 let ( >>? ) x f =
@@ -150,8 +152,9 @@ let unlock fd = Unix.lockf fd Unix.F_ULOCK 0
 let server_http large stack =
   Paf.init ~port:8080 stack >>= fun service ->
   let (`Initialized th) =
-    Paf.http ~error_handler ~request_handler:(request_handler large) service
-  in
+    Paf.http
+      ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
+      ~error_handler ~request_handler:(request_handler large) service in
   unlock fd_8080 ;
   th
 
@@ -173,8 +176,10 @@ let server_https cert key large stack =
       let tls = Tls.Config.server ~certificates:(`Single (certs, key)) () in
       Paf.init ~port:4343 stack >>= fun service ->
       let (`Initialized th) =
-        Paf.https ~tls ~error_handler ~request_handler:(request_handler large)
-          service in
+        Paf.https
+          ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
+          ~tls ~error_handler ~request_handler:(request_handler large) service
+      in
       unlock fd_4343 ;
       th
   | _ -> invalid_arg "Invalid certificate or key"

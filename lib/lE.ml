@@ -1,8 +1,7 @@
 (* (c) Hannes Menhert *)
 
-module Make (Time : Mirage_time.S) (Paf : Paf_cohttp.PAF) = struct
-  module Client = Paf_cohttp.Make (Paf)
-  module Acme = Letsencrypt.Client.Make (Client)
+module Make (Time : Mirage_time.S) = struct
+  module Acme = Letsencrypt.Client.Make (Paf_cohttp)
 
   module Log = (val let src = Logs.Src.create "letsencrypt" in
                     Logs.src_log src : Logs.LOG)
@@ -86,5 +85,5 @@ module Make (Time : Mirage_time.S) (Paf : Paf_cohttp.PAF) = struct
     Acme.sign_certificate ~ctx solver le sleep csr >|= fun certs ->
     `Single (certs, priv)
 
-  include Client
+  include Paf_cohttp
 end
