@@ -1,17 +1,18 @@
 (** MirageOS compatible layer of HTTP/AF. *)
 
-module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) : sig
+module type S = sig
   exception Error of Mimic.error
 
-  type stack = Stack.t
+  type stack
 
   type service
   (** The type of services. *)
 
-  val init : port:int -> Stack.t -> service Lwt.t
+  val init : port:int -> stack -> service Lwt.t
   (** [init ~port stack] returns a {!service} bound on [port] with [stack]. *)
 
   val http :
+    sleep:(int64 -> unit Lwt.t) ->
     ?config:Httpaf.Config.t ->
     ?stop:Lwt_switch.t ->
     error_handler:(Ipaddr.t * int -> Httpaf.Server_connection.error_handler) ->
@@ -43,6 +44,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) : sig
       ]} *)
 
   val https :
+    sleep:(int64 -> unit Lwt.t) ->
     tls:Tls.Config.server ->
     ?config:Httpaf.Config.t ->
     ?stop:Lwt_switch.t ->
@@ -52,17 +54,18 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) : sig
     [ `Initialized of unit Lwt.t ]
   (** Same as {!http}, but requires a TLS certificate [tls]. *)
 
-  val tcp_edn : (Stack.t * Ipaddr.t * int) Mimic.value
+  val tcp_edn : (stack * Ipaddr.t * int) Mimic.value
 
   val tls_edn :
     ([ `host ] Domain_name.t option
     * Tls.Config.client
-    * Stack.t
+    * stack
     * Ipaddr.t
     * int)
     Mimic.value
 
   val request :
+    sleep:(int64 -> unit Lwt.t) ->
     ?config:Httpaf.Config.t ->
     ctx:Mimic.ctx ->
     error_handler:
@@ -131,3 +134,37 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) : sig
       For a more user-friendly interface, you should take a look into
       [paf.cohttp]. *)
 end
+
+module Make (Stack : Mirage_stack.V4V6) : S with type stack = Stack.t
+
+(** {2 Unfunctorized API.}
+
+    Due to the design of Mimic and the ability to inject a {i flow} under the
+    [Mimic.flow], a {i unfunctorized} API exists to starting an HTTP server or
+    an HTTP client.
+
+    These processes can work, as below, with a TCP/IP stack (with or without
+    TLS) or something else. See Mimic for more details. *)
+
+type flow = Mimic.flow
+
+exception Error of Mimic.error
+
+val create_server_connection_handler :
+  sleep:(int64 -> unit Lwt.t) ->
+  ?config:Httpaf.Config.t ->
+  request_handler:('endpoint -> Httpaf.Server_connection.request_handler) ->
+  error_handler:('endpoint -> Httpaf.Server_connection.error_handler) ->
+  'endpoint ->
+  flow ->
+  unit Lwt.t
+
+val request :
+  sleep:(int64 -> unit Lwt.t) ->
+  ?config:Httpaf.Config.t ->
+  flow ->
+  'endpoint ->
+  Httpaf.Request.t ->
+  error_handler:(flow -> 'endpoint -> Httpaf.Client_connection.error_handler) ->
+  response_handler:('endpoint -> Httpaf.Client_connection.response_handler) ->
+  [ `write ] Httpaf.Body.t

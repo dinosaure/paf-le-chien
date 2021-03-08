@@ -28,7 +28,8 @@ module Make
   (Pclock : Mirage_clock.PCLOCK)
   (Stack : Mirage_stack.V4V6)
   (Dns : DNS) (* XXX(dinosaure): ask @hannesm to provide a signature. *)
-  (Client : Paf_cohttp.S) = struct
+  (Paf : Paf.S) = struct
+  module Client = Paf_cohttp
   module Nss = Ca_certs_nss.Make(Pclock)
 
   let authenticator = Rresult.R.failwith_error_msg (Nss.authenticator ())
@@ -42,7 +43,7 @@ module Make
   let with_tcp ctx =
     let k scheme stack ipaddr port = match scheme with
       | `HTTP -> Lwt.return_some (stack, ipaddr, port) | _ -> Lwt.return_none in
-    Mimic.(fold Client.tcp_edn Fun.[ req Client.scheme
+    Mimic.(fold Paf.tcp_edn Fun.[ req Client.scheme
                                    ; req stack
                                    ; req Client.ipaddr
                                    ; dft Client.port 80 ] ~k ctx)
@@ -50,7 +51,7 @@ module Make
   let with_tls ctx =
     let k scheme domain_name cfg stack ipaddr port = match scheme with
       | `HTTPS -> Lwt.return_some (domain_name, cfg, stack, ipaddr, port) | _ -> Lwt.return_none in
-    Mimic.(fold Client.tls_edn Fun.[ req Client.scheme
+    Mimic.(fold Paf.tls_edn Fun.[ req Client.scheme
                                    ; opt Client.domain_name
                                    ; dft tls default_tls_cfg
                                    ; req stack

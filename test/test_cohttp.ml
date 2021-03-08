@@ -1,5 +1,7 @@
 open Lwt.Infix
 
+let ( <.> ) f g x = f (g x)
+
 let reporter ppf =
   let report src level ~over k msgf =
     let k _ =
@@ -22,7 +24,7 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let () = Mirage_crypto_rng_unix.initialize ()
 
-module Paf = Paf.Make (Time) (Tcpip_stack_socket.V4V6)
+module Paf = Paf.Make (Tcpip_stack_socket.V4V6)
 
 let unix_stack () =
   Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
@@ -52,14 +54,16 @@ let tls =
       Tls.Config.server ~certificates:(`Single (certs, key)) ()
   | _ -> invalid_arg "Invalid certificate or key"
 
+let sleep = Lwt_unix.sleep <.> Int64.to_float
+
 let run_http_and_https_server ~request_handler stop =
   unix_stack () >>= fun stack ->
   Paf.init ~port:9090 stack >>= fun http ->
   Paf.init ~port:3434 stack >>= fun https ->
   let (`Initialized fiber0) =
-    Paf.http ~stop ~error_handler ~request_handler http in
+    Paf.http ~sleep ~stop ~error_handler ~request_handler http in
   let (`Initialized fiber1) =
-    Paf.https ~tls ~stop ~error_handler ~request_handler https in
+    Paf.https ~sleep ~tls ~stop ~error_handler ~request_handler https in
   Logs.debug (fun m -> m "Server initialised.") ;
   Lwt.async (fun () -> Lwt.join [ fiber0; fiber1 ]) ;
   Lwt.return_unit
@@ -86,7 +90,7 @@ let null =
   let authenticator ~host:_ _ = Ok None in
   Tls.Config.client ~authenticator ()
 
-module Client = Paf_cohttp.Make (Paf)
+module Client = Paf_cohttp
 
 let stack = Mimic.make ~name:"stack"
 
@@ -97,25 +101,26 @@ let ctx =
        fold Paf.tcp_edn
          Fun.
            [
-             req Client.scheme;
+             req Paf_cohttp.scheme;
              req stack;
-             req Client.ipaddr;
-             dft Client.port 9090;
+             req Paf_cohttp.ipaddr;
+             dft Paf_cohttp.port 9090;
            ]
          ~k:tcp_connect)
   |> Mimic.(
        fold Paf.tls_edn
          Fun.
            [
-             req Client.scheme;
-             opt Client.domain_name;
+             req Paf_cohttp.scheme;
+             opt Paf_cohttp.domain_name;
              dft tls null;
              req stack;
-             req Client.ipaddr;
-             dft Client.port 3434;
+             req Paf_cohttp.ipaddr;
+             dft Paf_cohttp.port 3434;
            ]
          ~k:tls_connect)
-  |> Mimic.(fold Client.ipaddr Fun.[ req Client.domain_name ] ~k:resolver)
+  |> Mimic.(
+       fold Paf_cohttp.ipaddr Fun.[ req Paf_cohttp.domain_name ] ~k:resolver)
 
 let body_to_string body =
   let buf = Buffer.create 0x100 in

@@ -1,9 +1,10 @@
 module type HTTPAF = sig
-  type flow
+  type flow = Mimic.flow
 
   exception Error of Mimic.error
 
   val create_server_connection_handler :
+    sleep:(int64 -> unit Lwt.t) ->
     ?config:Httpaf.Config.t ->
     request_handler:('endpoint -> Httpaf.Server_connection.request_handler) ->
     error_handler:('endpoint -> Httpaf.Server_connection.error_handler) ->
@@ -12,6 +13,7 @@ module type HTTPAF = sig
     unit Lwt.t
 
   val request :
+    sleep:(int64 -> unit Lwt.t) ->
     ?config:Httpaf.Config.t ->
     flow ->
     'endpoint ->
@@ -21,14 +23,14 @@ module type HTTPAF = sig
     [ `write ] Httpaf.Body.t
 end
 
-module Httpaf (Time : Mirage_time.S) : HTTPAF with type flow = Mimic.flow =
-struct
+module Core : HTTPAF = struct
   let src = Logs.Src.create "paf"
 
   module Log = (val Logs.src_log src : Logs.LOG)
 
   type server = {
     flow : Mimic.flow;
+    sleep : int64 -> unit Lwt.t;
     queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t;
     mutable rd_closed : bool;
     mutable wr_closed : bool;
@@ -84,15 +86,16 @@ struct
         if shift = 0 then Ke.Rke.compress flow.queue ;
         Lwt.return `Continue
 
-  let sleep timeout =
-    Time.sleep_ns timeout >>= fun () -> Lwt.return (Error `Closed)
+  let sleep (flow : server) timeout =
+    flow.sleep timeout >>= fun () -> Lwt.return (Error `Closed)
 
   let writev ?(timeout = 5_000_000_000L) flow iovecs =
     let rec go acc = function
       | [] -> Lwt.return (`Ok acc)
       | { Faraday.buffer; off; len } :: rest -> (
           let raw = Cstruct.of_bigarray buffer ~off ~len in
-          Lwt.pick [ Mimic.write flow.flow raw; sleep timeout ] >>= function
+          Lwt.pick [ Mimic.write flow.flow raw; sleep flow timeout ]
+          >>= function
           | Ok () -> go (acc + len) rest
           | Error `Closed ->
               flow.wr_closed <- true ;
@@ -115,7 +118,7 @@ struct
       Mimic.close flow.flow)
     else Lwt.return ()
 
-  let create_server_connection_handler ?(config = Httpaf.Config.default)
+  let create_server_connection_handler ~sleep ?(config = Httpaf.Config.default)
       ~request_handler ~error_handler =
     let connection_handler edn flow =
       let module Server_connection = Httpaf.Server_connection in
@@ -123,7 +126,7 @@ struct
         Server_connection.create ~config ~error_handler:(error_handler edn)
           (request_handler edn) in
       let queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
-      let flow = { flow; queue; rd_closed = false; wr_closed = false } in
+      let flow = { flow; sleep; queue; rd_closed = false; wr_closed = false } in
       let rd_exit, notify_rd_exit = Lwt.task () in
       let wr_exit, notify_wr_exit = Lwt.task () in
       let rec rd_fiber () =
@@ -180,10 +183,14 @@ struct
 
   type client = {
     flow : Mimic.flow;
+    sleep : int64 -> unit Lwt.t;
     queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t;
     mutable rd_closed : bool;
     mutable wr_closed : bool;
   }
+
+  let sleep (flow : client) timeout =
+    flow.sleep timeout >>= fun () -> Lwt.return (Error `Closed)
 
   let safely_close flow =
     if flow.rd_closed && flow.wr_closed
@@ -249,7 +256,8 @@ struct
       | [] -> Lwt.return (`Ok acc)
       | { Faraday.buffer; off; len } :: rest -> (
           let raw = Cstruct.of_bigarray buffer ~off ~len in
-          Lwt.pick [ Mimic.write flow.flow raw; sleep timeout ] >>= function
+          Lwt.pick [ Mimic.write flow.flow raw; sleep flow timeout ]
+          >>= function
           | Ok () -> go (acc + len) rest
           | Error `Closed ->
               flow.wr_closed <- true ;
@@ -267,15 +275,15 @@ struct
       Mimic.close flow.flow)
     else Lwt.return ()
 
-  let request ?(config = Httpaf.Config.default) flow edn request ~error_handler
-      ~response_handler =
+  let request ~sleep ?(config = Httpaf.Config.default) flow edn request
+      ~error_handler ~response_handler =
     let module Client_connection = Httpaf.Client_connection in
     let request_body, connection =
       Client_connection.request ~config request
         ~error_handler:(error_handler flow edn)
         ~response_handler:(response_handler edn) in
     let queue = Ke.Rke.create ~capacity:config.read_buffer_size Bigarray.char in
-    let flow = { flow; queue; rd_closed = false; wr_closed = false } in
+    let flow = { flow; sleep; queue; rd_closed = false; wr_closed = false } in
     let read_loop_exited, notify_read_loop_exited = Lwt.wait () in
 
     let rd_loop () =
@@ -343,7 +351,59 @@ struct
     request_body
 end
 
-module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
+module type S = sig
+  exception Error of Mimic.error
+
+  type stack
+
+  type service
+
+  val init : port:int -> stack -> service Lwt.t
+
+  val http :
+    sleep:(int64 -> unit Lwt.t) ->
+    ?config:Httpaf.Config.t ->
+    ?stop:Lwt_switch.t ->
+    error_handler:(Ipaddr.t * int -> Httpaf.Server_connection.error_handler) ->
+    request_handler:(Ipaddr.t * int -> Httpaf.Server_connection.request_handler) ->
+    service ->
+    [ `Initialized of unit Lwt.t ]
+
+  val https :
+    sleep:(int64 -> unit Lwt.t) ->
+    tls:Tls.Config.server ->
+    ?config:Httpaf.Config.t ->
+    ?stop:Lwt_switch.t ->
+    error_handler:(Ipaddr.t * int -> Httpaf.Server_connection.error_handler) ->
+    request_handler:(Ipaddr.t * int -> Httpaf.Server_connection.request_handler) ->
+    service ->
+    [ `Initialized of unit Lwt.t ]
+
+  val tcp_edn : (stack * Ipaddr.t * int) Mimic.value
+
+  val tls_edn :
+    ([ `host ] Domain_name.t option
+    * Tls.Config.client
+    * stack
+    * Ipaddr.t
+    * int)
+    Mimic.value
+
+  val request :
+    sleep:(int64 -> unit Lwt.t) ->
+    ?config:Httpaf.Config.t ->
+    ctx:Mimic.ctx ->
+    error_handler:
+      (Mimic.flow ->
+      (Ipaddr.t * int) option ->
+      Httpaf.Client_connection.error_handler) ->
+    response_handler:
+      ((Ipaddr.t * int) option -> Httpaf.Client_connection.response_handler) ->
+    Httpaf.Request.t ->
+    ([ `write ] Httpaf.Body.t, [> Mimic.error ]) result Lwt.t
+end
+
+module Make (Stack : Mirage_stack.V4V6) : S with type stack = Stack.t = struct
   open Lwt.Infix
 
   module TCP = struct
@@ -424,8 +484,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
   let tls_edn, tls_protocol =
     Mimic.register ~priority:10 ~name:"tls" (module TLS)
 
-  module Httpaf = Httpaf (Time)
-  include Httpaf
+  include Core
 
   type service = {
     stack : Stack.t;
@@ -476,11 +535,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
 
   let ( >>? ) = Lwt_result.bind
 
-  let serve_when_ready ?timeout ?stop ~handler service =
-    let timeout () =
-      match timeout with
-      | None -> Lwt.wait () |> fst
-      | Some t -> Time.sleep_ns t in
+  let serve_when_ready ?stop ~handler service =
     `Initialized
       (let switched_off =
          let t, u = Lwt.wait () in
@@ -491,21 +546,13 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
        let rec loop () =
          let accept =
            accept service >>? fun flow -> Lwt.return_ok (`Flow flow) in
-         Lwt.pick [ accept; (timeout () >|= fun () -> Ok `Timeout) ]
-         >>? function
+         accept >>? function
          | `Flow flow ->
              Lwt.async (fun () -> handler flow) ;
-             Lwt.pause () >>= loop
-         | `Timeout -> Lwt.return_ok `Timeout in
+             Lwt.pause () >>= loop in
        let stop_result =
          Lwt.pick [ switched_off; loop () ] >>= function
-         | Ok ((`Timeout | `Stopped) as signal) ->
-             let pp_signal ppf = function
-               | `Timeout -> Fmt.string ppf "timeout"
-               | `Stopped -> Fmt.string ppf "stopped" in
-             Log.debug (fun m ->
-                 m "Shutdown the service (%a)." pp_signal signal) ;
-             close service >>= fun () -> Lwt.return_ok ()
+         | Ok `Stopped -> close service >>= fun () -> Lwt.return_ok ()
          | Error _ as err -> close service >>= fun () -> Lwt.return err in
        stop_result >>= function Ok () | Error `Closed -> Lwt.return_unit)
 
@@ -513,34 +560,36 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
 
   module Tls = (val Mimic.repr tls_protocol)
 
-  let http ?config ?stop ~error_handler ~request_handler service =
+  let http ~sleep ?config ?stop ~error_handler ~request_handler service =
     let handler socket =
       let ipaddr, port = Stack.TCP.dst socket in
-      create_server_connection_handler ?config ~error_handler ~request_handler
-        (ipaddr, port) (Tcp.T socket) in
+      create_server_connection_handler ~sleep ?config ~error_handler
+        ~request_handler (ipaddr, port) (Tcp.T socket) in
     serve_when_ready ?stop ~handler service
 
-  let https ~tls ?config ?stop ~error_handler ~request_handler service =
+  let https ~sleep ~tls ?config ?stop ~error_handler ~request_handler service =
     let handler socket =
       let ipaddr, port = Stack.TCP.dst socket in
       TLS.server_of_flow tls socket >>= function
       | Ok state ->
-          create_server_connection_handler ?config ~error_handler
+          create_server_connection_handler ~sleep ?config ~error_handler
             ~request_handler (ipaddr, port) (Tls.T state)
       | Error _ -> Lwt.return_unit in
     serve_when_ready ?stop ~handler service
 
-  let request ?config ~ctx ~error_handler ~response_handler v =
+  let request ~sleep ?config ~ctx ~error_handler ~response_handler v =
     Mimic.resolve ctx >>= function
     | Error _ as err -> Lwt.return err
     | Ok (Tcp.T socket as flow) ->
         Logs.debug (fun m -> m "Connected to the peer.") ;
         let ipaddr, port = Stack.TCP.dst socket in
         Lwt.return_ok
-          (request ?config flow
+          (request ~sleep ?config flow
              (Some (ipaddr, port))
              v ~error_handler ~response_handler)
     | Ok flow ->
         Lwt.return_ok
-          (request ?config flow None v ~error_handler ~response_handler)
+          (request ~sleep ?config flow None v ~error_handler ~response_handler)
 end
+
+include Core

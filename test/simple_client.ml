@@ -6,7 +6,7 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
 
-module Paf = Paf.Make (Time) (Tcpip_stack_socket.V4V6)
+module Paf = Paf.Make (Tcpip_stack_socket.V4V6)
 open Lwt.Infix
 
 let ( >>? ) x f =
@@ -145,8 +145,9 @@ let run uri =
   let response_handler = response_handler th_err ~f in
   v >>= fun v ->
   let ctx = Mimic.add stack v ctx in
-  Paf.request ~ctx ~error_handler:(error_handler wk_err) ~response_handler
-    request
+  Paf.request
+    ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
+    ~ctx ~error_handler:(error_handler wk_err) ~response_handler request
   >>? fun body ->
   Httpaf.Body.close_writer body ;
   Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function

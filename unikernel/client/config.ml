@@ -7,23 +7,10 @@ let paf_conf () =
   let packages = [ package "paf" ] in
   impl @@ object
     inherit base_configurable
-    method ty = time @-> stackv4v6 @-> paf
+    method ty = stackv4v6 @-> paf
     method module_name = "Paf.Make"
     method! packages = Key.pure packages
     method name = "paf"
-  end
-
-type paf_cohttp = Paf_cohttp
-let paf_cohttp = typ Paf_cohttp
-
-let paf_cohttp_conf () =
-  let packages = [ package "paf" ~sublibs:[ "cohttp" ] ] in
-  impl @@ object
-    inherit base_configurable
-    method ty = paf @-> paf_cohttp
-    method module_name = "Paf_cohttp.Make"
-    method! packages = Key.pure packages
-    method name = "paf_cohttp"
   end
 
 type dns = Dns
@@ -50,11 +37,11 @@ let uri =
 let minipaf =
   foreign "Unikernel.Make"
     ~keys:[ Key.abstract uri ]
-    ~packages:[ package "ca-certs-nss" ]
-    (console @-> time @-> pclock @-> stackv4v6 @-> dns @-> paf_cohttp @-> job)
+    ~packages:[ package "paf" ~sublibs:[ "cohttp" ]
+              ; package "ca-certs-nss" ]
+    (console @-> time @-> pclock @-> stackv4v6 @-> dns @-> paf @-> job)
 
-let paf time stackv4v6 = paf_conf () $ time $ stackv4v6
-let paf_cohttp paf = paf_cohttp_conf () $ paf
+let paf stackv4v6 = paf_conf () $ stackv4v6
 let dns random time mclock stackv4 = dns_conf () $ random $ time $ mclock $ stackv4
 
 let random = default_random
@@ -65,6 +52,5 @@ let mclock = default_monotonic_clock
 let stackv4v6 = generic_stackv4v6 default_network
 let stackv4 = generic_stackv4 default_network
 let dns = dns random time mclock stackv4
-let paf_cohttp = paf_cohttp (paf time stackv4v6) 
 
-let () = register "minipaf" [ minipaf $ console $ time $ pclock $ stackv4v6 $ dns $ paf_cohttp ]
+let () = register "minipaf" [ minipaf $ console $ time $ pclock $ stackv4v6 $ dns $ paf stackv4v6 ]
