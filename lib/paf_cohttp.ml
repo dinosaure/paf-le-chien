@@ -102,22 +102,23 @@ let with_host headers uri =
     | None -> hostname in
   Httpaf.Headers.add_unless_exists headers "host" hostname
 
-let with_transfer_encoding ~chunked body headers =
-  match (chunked, body, Httpaf.Headers.get headers "content-length") with
-  | (None | Some false), _, Some _ -> headers
-  | Some true, _, (Some _ | None) | None, `Stream _, None ->
+let with_transfer_encoding ~chunked (meth : Cohttp.Code.meth) body headers =
+  match (meth, chunked, body, Httpaf.Headers.get headers "content-length") with
+  | `GET, _, _, _ -> headers
+  | _, (None | Some false), _, Some _ -> headers
+  | _, Some true, _, (Some _ | None) | _, None, `Stream _, None ->
       (* XXX(dinosaure): I'm not sure that the [Some _] was right. *)
       Httpaf.Headers.add_unless_exists headers "transfer-encoding" "chunked"
-  | (None | Some false), `Empty, None ->
+  | _, (None | Some false), `Empty, None ->
       Httpaf.Headers.add_unless_exists headers "content-length" "0"
-  | (None | Some false), `String str, None ->
+  | _, (None | Some false), `String str, None ->
       Httpaf.Headers.add_unless_exists headers "content-length"
         (string_of_int (String.length str))
-  | (None | Some false), `Strings sstr, None ->
+  | _, (None | Some false), `Strings sstr, None ->
       let len = List.fold_right (( + ) <.> String.length) sstr 0 in
       Httpaf.Headers.add_unless_exists headers "content-length"
         (string_of_int len)
-  | Some false, `Stream _, None ->
+  | _, Some false, `Stream _, None ->
       invalid_arg "Impossible to transfer a stream with a content-length value"
 
 let call ?(ctx = default_ctx) ?headers
@@ -138,13 +139,13 @@ let call ?(ctx = default_ctx) ?headers
     | Some headers -> Httpaf.Headers.of_list (Cohttp.Header.to_list headers)
     | None -> Httpaf.Headers.empty in
   let headers = with_host headers uri in
-  let headers = with_transfer_encoding ~chunked cohttp_body headers in
+  let headers = with_transfer_encoding ~chunked meth cohttp_body headers in
   let meth =
     match meth with
     | #Httpaf.Method.t as meth -> meth
     | #Cohttp.Code.meth as meth -> `Other (Cohttp.Code.string_of_method meth)
   in
-  let req = Httpaf.Request.create ~headers meth (Uri.path uri) in
+  let req = Httpaf.Request.create ~headers meth (Uri.path_and_query uri) in
   let stream, pusher = Lwt_stream.create () in
   let mvar_res = Lwt_mvar.create_empty () in
   let mvar_err = Lwt_mvar.create_empty () in
