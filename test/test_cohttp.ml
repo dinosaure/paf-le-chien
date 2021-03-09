@@ -137,6 +137,15 @@ let body_to_string body =
   Httpaf.Body.schedule_read body ~on_eof ~on_read ;
   th
 
+let query_to_assoc str =
+  let lst =
+    Astring.String.fields ~is_sep:(function '&' -> true | _ -> false) str in
+  let f str =
+    match Astring.String.cut ~sep:"=" str with
+    | Some (k, v) -> (k, v)
+    | None -> (str, "") in
+  List.map f lst
+
 let request_handler (ip, port) reqd =
   let open Httpaf in
   let req = Reqd.request reqd in
@@ -164,6 +173,23 @@ let request_handler (ip, port) reqd =
       let resp = Response.create ~headers `OK in
       Reqd.respond_with_string reqd resp str ;
       Lwt.return_unit
+  | target ->
+  match Astring.String.cut ~sep:"?" target with
+  | Some ("/query", query) ->
+      let lst = query_to_assoc query in
+      let buf = Buffer.create 0x100 in
+      let ppf = Format.formatter_of_buffer buf in
+      Fmt.pf ppf "%a%!"
+        Fmt.(list ~sep:(any ";") (pair ~sep:(any "=") string string))
+        lst ;
+      let contents = Buffer.contents buf in
+      let headers =
+        Headers.of_list
+          [ ("content-length", string_of_int (String.length contents)) ] in
+      let resp = Response.create ~headers `OK in
+      Reqd.respond_with_string reqd resp contents ;
+      Lwt.async @@ fun () ->
+      body_to_string body >>= fun _ -> Lwt.return_unit
   | _ ->
       Reqd.report_exn reqd Not_found ;
       let contents = "Invalid request." in
@@ -215,8 +241,19 @@ let test04 =
   Alcotest.(check string) "contents" str "Secret Hello!" ;
   Lwt.return_unit
 
+let test05 =
+  Alcotest_lwt.test_case "queries" `Quick @@ fun _sw () ->
+  unix_stack () >>= fun v ->
+  let ctx = Mimic.add stack v ctx in
+  Client.get ~ctx (Uri.of_string "https://localhost:3434/query?foo=a&bar=b")
+  >>= fun (_resp, body) ->
+  Cohttp_lwt.Body.to_string body >>= fun str ->
+  Alcotest.(check string) "contents" str "foo=a;bar=b" ;
+  Lwt.return_unit
+
 let test () =
-  Alcotest_lwt.run "smart" [ ("cohttp", [ test01; test02; test03; test04 ]) ]
+  Alcotest_lwt.run "smart"
+    [ ("cohttp", [ test01; test02; test03; test04; test05 ]) ]
 
 let () =
   let fiber =
