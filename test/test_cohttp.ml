@@ -24,7 +24,7 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let () = Mirage_crypto_rng_unix.initialize ()
 
-module Paf = Paf.Make (Tcpip_stack_socket.V4V6)
+module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
 
 let unix_stack () =
   Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
@@ -58,12 +58,12 @@ let sleep = Lwt_unix.sleep <.> Int64.to_float
 
 let run_http_and_https_server ~request_handler stop =
   unix_stack () >>= fun stack ->
-  Paf.init ~port:9090 stack >>= fun http ->
-  Paf.init ~port:3434 stack >>= fun https ->
-  let (`Initialized fiber0) =
-    Paf.http ~sleep ~stop ~error_handler ~request_handler http in
-  let (`Initialized fiber1) =
-    Paf.https ~sleep ~tls ~stop ~error_handler ~request_handler https in
+  P.init ~port:9090 stack >>= fun socket0 ->
+  P.init ~port:3434 stack >>= fun socket1 ->
+  let http = P.http_service ~error_handler request_handler in
+  let https = P.https_service ~tls ~error_handler request_handler in
+  let (`Initialized fiber0) = P.serve ~stop http socket0 in
+  let (`Initialized fiber1) = P.serve ~stop https socket1 in
   Logs.debug (fun m -> m "Server initialised.") ;
   Lwt.async (fun () -> Lwt.join [ fiber0; fiber1 ]) ;
   Lwt.return_unit
@@ -98,7 +98,7 @@ let ctx =
   let tls = Mimic.make ~name:"tls" in
   Mimic.empty
   |> Mimic.(
-       fold Paf.tcp_edn
+       fold P.tcp_edn
          Fun.
            [
              req Paf_cohttp.scheme;
@@ -108,7 +108,7 @@ let ctx =
            ]
          ~k:tcp_connect)
   |> Mimic.(
-       fold Paf.tls_edn
+       fold P.tls_edn
          Fun.
            [
              req Paf_cohttp.scheme;

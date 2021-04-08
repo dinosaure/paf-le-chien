@@ -20,10 +20,9 @@ let default_ctx = Mimic.empty
 
 let httpaf_config = Mimic.make ~name:"httpaf-config"
 
-let error_handler mvar flow edn err =
-  Lwt.async @@ fun () -> Lwt_mvar.put mvar (flow, edn, err)
+let error_handler mvar err = Lwt.async @@ fun () -> Lwt_mvar.put mvar err
 
-let response_handler mvar pusher _edn resp body =
+let response_handler mvar pusher resp body =
   let on_eof () = pusher None in
   let rec on_read buf ~off ~len =
     let str = Bigstringaf.substring buf ~off ~len in
@@ -154,11 +153,14 @@ let call ?(ctx = default_ctx) ?headers
   | Error (#Mimic.error as err) ->
       Lwt.fail (Failure (Fmt.str "%a" Mimic.pp_error err))
   | Ok flow -> (
+      let conn = Httpaf.Client_connection.create ~config in
+      let error_handler = error_handler mvar_err in
+      let response_handler = response_handler mvar_res pusher in
       let httpaf_body =
-        Paf.request ~sleep ~config flow ()
-          ~error_handler:(error_handler mvar_err)
-          ~response_handler:(response_handler mvar_res pusher)
+        Httpaf.Client_connection.request conn ~error_handler ~response_handler
           req in
+      Lwt.async (fun () ->
+          Paf.run ~sleep (module Httpaf.Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
       Log.debug (fun m -> m "Body transmitted.") ;
       Lwt.pick
@@ -167,12 +169,11 @@ let call ?(ctx = default_ctx) ?headers
           (Lwt_mvar.take mvar_err >|= fun err -> `Error err);
         ]
       >>= function
-      | `Error (flow, _, `Exn exn) ->
-          Mimic.close flow >>= fun () -> Lwt.fail exn
-      | `Error (flow, _, `Invalid_response_body_length resp) ->
+      | `Error (`Exn exn) -> Mimic.close flow >>= fun () -> Lwt.fail exn
+      | `Error (`Invalid_response_body_length resp) ->
           Mimic.close flow >>= fun () ->
           Lwt.fail (Invalid_response_body_length resp)
-      | `Error (flow, _, `Malformed_response err) ->
+      | `Error (`Malformed_response err) ->
           Mimic.close flow >>= fun () -> Lwt.fail (Malformed_response err)
       | `Response resp ->
           Log.debug (fun m -> m "Response received.") ;
