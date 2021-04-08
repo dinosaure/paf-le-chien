@@ -40,8 +40,11 @@ let response_handler_v2_0 edn f resp body =
 
 module Httpaf_Client_connection = struct
   include Httpaf.Client_connection
+
   let yield_reader _ = assert false
-  let next_read_operation t = (next_read_operation t :> [ `Close | `Read | `Yield ])
+
+  let next_read_operation t =
+    (next_read_operation t :> [ `Close | `Read | `Yield ])
 end
 
 let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =

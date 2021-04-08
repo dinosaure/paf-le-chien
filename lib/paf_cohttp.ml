@@ -122,8 +122,11 @@ let with_transfer_encoding ~chunked (meth : Cohttp.Code.meth) body headers =
 
 module Httpaf_Client_connection = struct
   include Httpaf.Client_connection
+
   let yield_reader _ = assert false
-  let next_read_operation t = (next_read_operation t :> [ `Close | `Read | `Yield ])
+
+  let next_read_operation t =
+    (next_read_operation t :> [ `Close | `Read | `Yield ])
 end
 
 let call ?(ctx = default_ctx) ?headers
@@ -162,8 +165,8 @@ let call ?(ctx = default_ctx) ?headers
       let error_handler = error_handler mvar_err in
       let response_handler = response_handler mvar_res pusher in
       let httpaf_body, conn =
-        Httpaf.Client_connection.request ~config ~error_handler ~response_handler
-          req in
+        Httpaf.Client_connection.request ~config ~error_handler
+          ~response_handler req in
       Lwt.async (fun () ->
           Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
@@ -233,5 +236,7 @@ let post_form ?ctx:_ ?headers:_ ~params:_ _uri = assert false (* TODO *)
 let callv ?ctx:_ _uri _stream = assert false (* TODO *)
 
 [@@@warning "-32"]
+
 let sexp_of_ctx _ctx = assert false
+
 [@@@warning "+32"]
