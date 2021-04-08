@@ -232,4 +232,6 @@ let post_form ?ctx:_ ?headers:_ ~params:_ _uri = assert false (* TODO *)
 
 let callv ?ctx:_ _uri _stream = assert false (* TODO *)
 
+[@@@warning "-32"]
 let sexp_of_ctx _ctx = assert false
+[@@@warning "+32"]
