@@ -120,6 +120,12 @@ let with_transfer_encoding ~chunked (meth : Cohttp.Code.meth) body headers =
   | _, Some false, `Stream _, None ->
       invalid_arg "Impossible to transfer a stream with a content-length value"
 
+module Httpaf_Client_connection = struct
+  include Httpaf.Client_connection
+  let yield_reader _ = assert false
+  let next_read_operation t = (next_read_operation t :> [ `Close | `Read | `Yield ])
+end
+
 let call ?(ctx = default_ctx) ?headers
     ?body:(cohttp_body = Cohttp_lwt.Body.empty) ?chunked meth uri =
   Log.debug (fun m -> m "Fill the context with %a." Uri.pp uri) ;
@@ -153,14 +159,13 @@ let call ?(ctx = default_ctx) ?headers
   | Error (#Mimic.error as err) ->
       Lwt.fail (Failure (Fmt.str "%a" Mimic.pp_error err))
   | Ok flow -> (
-      let conn = Httpaf.Client_connection.create ~config in
       let error_handler = error_handler mvar_err in
       let response_handler = response_handler mvar_res pusher in
-      let httpaf_body =
-        Httpaf.Client_connection.request conn ~error_handler ~response_handler
+      let httpaf_body, conn =
+        Httpaf.Client_connection.request ~config ~error_handler ~response_handler
           req in
       Lwt.async (fun () ->
-          Paf.run ~sleep (module Httpaf.Client_connection) conn flow) ;
+          Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
       Log.debug (fun m -> m "Body transmitted.") ;
       Lwt.pick

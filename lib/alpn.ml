@@ -38,6 +38,12 @@ let response_handler_v1_1 edn f resp body =
 let response_handler_v2_0 edn f resp body =
   f edn (Handler (HTTP_2_0, resp, body))
 
+module Httpaf_Client_connection = struct
+  include Httpaf.Client_connection
+  let yield_reader _ = assert false
+  let next_read_operation t = (next_read_operation t :> [ `Close | `Read | `Yield ])
+end
+
 let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
   match (alpn, request) with
   | (Some "h2" | None), `V2 request ->
@@ -53,24 +59,22 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
           Paf.run (module H2.Client_connection) ~sleep conn flow) ;
       Lwt.return_ok (Body (HTTP_2_0, body))
   | Some "http/1.0", `V1 request ->
-      let conn = Httpaf.Client_connection.create ?config:None in
       let error_handler = error_handler_v1 edn error_handler in
       let response_handler = response_handler_v1_0 edn response_handler in
-      let body =
-        Httpaf.Client_connection.request conn request ~error_handler
+      let body, conn =
+        Httpaf.Client_connection.request ?config:None request ~error_handler
           ~response_handler in
       Lwt.async (fun () ->
-          Paf.run (module Httpaf.Client_connection) ~sleep conn flow) ;
+          Paf.run (module Httpaf_Client_connection) ~sleep conn flow) ;
       Lwt.return_ok (Body (HTTP_1_0, body))
   | (Some "http/1.1" | None), `V1 request ->
-      let conn = Httpaf.Client_connection.create ?config:None in
       let error_handler = error_handler_v1 edn error_handler in
       let response_handler = response_handler_v1_1 edn response_handler in
-      let body =
-        Httpaf.Client_connection.request conn request ~error_handler
+      let body, conn =
+        Httpaf.Client_connection.request ?config:None request ~error_handler
           ~response_handler in
       Lwt.async (fun () ->
-          Paf.run (module Httpaf.Client_connection) ~sleep conn flow) ;
+          Paf.run (module Httpaf_Client_connection) ~sleep conn flow) ;
       Lwt.return_ok (Body (HTTP_1_1, body))
   | Some protocol, _ ->
       Lwt.return_error
