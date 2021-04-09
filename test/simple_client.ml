@@ -17,10 +17,10 @@ let ( >>? ) x f =
 let ( <.> ) f g x = f (g x)
 
 let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
-    [ `read ] Alpn.handler -> unit = function
-  | Alpn.Handler (Alpn.HTTP_1_0, _, _) -> failf "Invalid protocol HTTP/1.0"
-  | Alpn.Handler (Alpn.HTTP_2_0, _, _) -> failf "Invalid protocol H2"
-  | Alpn.Handler (Alpn.HTTP_1_1, response, body) -> (
+    [ `read ] Alpn.resp_handler -> unit = function
+  | Alpn.Resp_handler (Alpn.HTTP_1_0, _, _) -> failf "Invalid protocol HTTP/1.0"
+  | Alpn.Resp_handler (Alpn.HTTP_2_0, _, _) -> failf "Invalid protocol H2"
+  | Alpn.Resp_handler (Alpn.HTTP_1_1, response, body) -> (
       let buf = Buffer.create 0x100 in
       let th, wk = Lwt.wait () in
       let on_eof () =
@@ -39,8 +39,8 @@ let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
 
 let failf fmt = Format.kasprintf (fun err -> raise (Failure err)) fmt
 
-let error_handler wk _ (err : Alpn.error) =
-  Lwt.wakeup_later wk (err :> [ `Body of string | `Done | Alpn.error ]) ;
+let error_handler wk _ (err : Alpn.client_error) =
+  Lwt.wakeup_later wk (err :> [ `Body of string | `Done | Alpn.client_error ]) ;
   match err with
   | `Exn (Paf.Flow err) ->
       failf "Impossible to start a transmission: %a" Mimic.pp_error err
@@ -119,7 +119,7 @@ let run uri =
   let f _ body =
     Lwt.wakeup_later wk body ;
     Lwt.return () in
-  let th_err, (wk_err : [ `Body of string | `Done | Alpn.error ] Lwt.u) =
+  let th_err, (wk_err : [ `Body of string | `Done | Alpn.client_error ] Lwt.u) =
     Lwt.wait () in
   let ctx =
     match Uri.scheme uri with

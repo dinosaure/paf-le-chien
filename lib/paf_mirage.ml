@@ -1,11 +1,19 @@
 module type S = sig
   type stack
 
+  module TCP : Mirage_flow.S
+
+  module TLS : module type of Tls_mirage.Make (TCP)
+
   type t
 
   type dst = Ipaddr.t * int
 
   val init : port:int -> stack -> t Lwt.t
+
+  val accept : t -> (TCP.flow, [> `Closed ]) result Lwt.t
+
+  val close : t -> unit Lwt.t
 
   val http_service :
     ?config:Httpaf.Config.t ->
@@ -23,6 +31,8 @@ module type S = sig
   val serve :
     ?stop:Lwt_switch.t -> 't Paf.service -> 't -> [ `Initialized of unit Lwt.t ]
 
+  val tcp_protocol : (stack * Ipaddr.t * int, TCP.flow) Mimic.protocol
+
   val tcp_edn : (stack * Ipaddr.t * int) Mimic.value
 
   val tls_edn :
@@ -33,16 +43,21 @@ module type S = sig
     * int)
     Mimic.value
 
+  val tls_protocol :
+    ( [ `host ] Domain_name.t option * Tls.Config.client * stack * Ipaddr.t * int,
+      TLS.flow )
+    Mimic.protocol
+
   val run :
     ctx:Mimic.ctx ->
-    error_handler:(dst option -> Alpn.error -> unit) ->
-    response_handler:(dst option -> [ `read ] Alpn.handler -> unit) ->
+    error_handler:(dst option -> Alpn.client_error -> unit) ->
+    response_handler:(dst option -> [ `read ] Alpn.resp_handler -> unit) ->
     [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
     ([ `write ] Alpn.body, [> Mimic.error ]) result Lwt.t
 end
 
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
-  S with type stack = Stack.t = struct
+  S with type stack = Stack.t and type TCP.flow = Stack.TCP.flow = struct
   open Lwt.Infix
 
   type dst = Ipaddr.t * int
@@ -87,7 +102,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
 
     module Log = (val Logs.src_log src : Logs.LOG)
 
-    include Tls_mirage.Make (Stack.TCP)
+    include Tls_mirage.Make (TCP)
 
     type endpoint =
       [ `host ] Domain_name.t option
@@ -181,27 +196,30 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
       let conn =
         Httpaf.Server_connection.create ?config ~error_handler request_handler
       in
-      Lwt.return_ok (R.T flow, conn) in
-    Paf.service
-      ~runtime:(module Httpaf.Server_connection)
-      connection accept close
+      Lwt.return_ok
+        (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
+    Paf.service connection accept close
 
   let https_service ~tls ?config ~error_handler request_handler =
     let module R = (val Mimic.repr tls_protocol) in
-    let connection flow =
-      let dst = Stack.TCP.dst flow in
+    let accept t =
+      accept t >>= function
+      | Error _ as err -> Lwt.return err
+      | Ok flow -> (
+          let dst = Stack.TCP.dst flow in
+          TLS.server_of_flow tls flow >>= function
+          | Ok flow -> Lwt.return_ok (dst, flow)
+          | Error _ as err -> Stack.TCP.close flow >>= fun () -> Lwt.return err)
+    in
+    let connection (dst, flow) =
       let error_handler = error_handler dst in
       let request_handler = request_handler dst in
       let conn =
         Httpaf.Server_connection.create ?config ~error_handler request_handler
       in
-      TLS.server_of_flow tls flow >>= function
-      | Ok flow -> Lwt.return_ok (R.T flow, conn)
-      | Error _ as err -> Stack.TCP.close flow >>= fun () -> Lwt.return err
-    in
-    Paf.service
-      ~runtime:(module Httpaf.Server_connection)
-      connection accept close
+      Lwt.return_ok
+        (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
+    Paf.service connection accept close
 
   let serve ?stop service t = Paf.serve ~sleep:Time.sleep_ns ?stop service t
 

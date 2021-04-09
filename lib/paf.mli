@@ -64,6 +64,8 @@ exception Flow of Mimic.error
 
 type 'conn runtime = (module RUNTIME with type t = 'conn)
 
+type impl = Runtime : 'conn runtime * 'conn -> impl
+
 type sleep = int64 -> unit Lwt.t
 
 val server : 'conn runtime -> sleep:sleep -> 'conn -> Mimic.flow -> unit Lwt.t
@@ -73,8 +75,7 @@ val run : 'conn runtime -> sleep:sleep -> 'conn -> Mimic.flow -> unit Lwt.t
 type 't service
 
 val service :
-  runtime:'conn runtime ->
-  ('flow -> (Mimic.flow * 'conn, 'error) result Lwt.t) ->
+  ('flow -> (Mimic.flow * impl, 'error) result Lwt.t) ->
   ('t -> ('flow, ([> `Closed ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
   't service

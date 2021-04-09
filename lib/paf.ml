@@ -394,11 +394,12 @@ end = struct
     close flow
 end
 
+type impl = Runtime : 'conn runtime * 'conn -> impl
+
 type 't service =
   | Service : {
       accept : 't -> ('flow, ([> `Closed ] as 'error)) result Lwt.t;
-      connection : 'flow -> (Mimic.flow * 'conn, 'error) result Lwt.t;
-      runtime : 'conn runtime;
+      connection : 'flow -> (Mimic.flow * impl, 'error) result Lwt.t;
       close : 't -> unit Lwt.t;
     }
       -> 't service
@@ -409,8 +410,7 @@ and ('t, 'flow, 'error) posix = {
 }
   constraint 'error = [> `Closed ]
 
-let service ~runtime connection accept close =
-  Service { accept; connection; runtime; close }
+let service connection accept close = Service { accept; connection; close }
 
 open Rresult
 open Lwt.Infix
@@ -451,10 +451,10 @@ let server : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
   Server.server ~sleep conn flow
 
 let serve ~sleep ?stop service t =
-  let (Service { accept; runtime; connection; close }) = service in
+  let (Service { accept; connection; close }) = service in
   let handler flow =
     connection flow >>= function
-    | Ok (flow, conn) -> server runtime ~sleep conn flow
+    | Ok (flow, Runtime (runtime, conn)) -> server runtime ~sleep conn flow
     | Error _ -> Lwt.return_unit in
   serve_when_ready ?stop ~handler { accept; close } t
 
