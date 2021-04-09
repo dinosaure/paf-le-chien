@@ -14,8 +14,12 @@
 type 'c capability = Rd : [ `read ] capability | Wr : [ `write ] capability
 
 type body =
-  | Body_HTTP_1_1 : 'c capability * 'c Httpaf.Body.t -> body
+  | Body_HTTP_1_1 : 'c capability * 'c httpaf_body -> body
   | Body_HTTP_2_0 : 'c capability * 'c H2.Body.t -> body
+
+and _ httpaf_body =
+  | Body_wr : Httpaf.Body.Writer.t -> [ `write ] httpaf_body
+  | Body_rd : Httpaf.Body.Reader.t -> [ `read ] httpaf_body
 
 type response =
   | Response_HTTP_1_1 of Httpaf.Response.t
@@ -129,6 +133,15 @@ type client_error =
   | `Invalid_response_body_length_v1 of Httpaf.Response.t
   | `Invalid_response_body_length_v2 of H2.Response.t
   | `Protocol_error of H2.Error_code.t * string ]
+
+val error_handler_v1 :
+  'edn ->
+  ('edn -> client_error -> unit) ->
+  Httpaf.Client_connection.error ->
+  unit
+
+val error_handler_v2 :
+  'edn -> ('edn -> client_error -> unit) -> H2.Client_connection.error -> unit
 
 val run :
   sleep:Paf.sleep ->
