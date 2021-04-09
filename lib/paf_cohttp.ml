@@ -165,8 +165,8 @@ let call ?(ctx = default_ctx) ?headers
       let error_handler = error_handler mvar_err in
       let response_handler = response_handler mvar_res pusher in
       let httpaf_body, conn =
-        Httpaf.Client_connection.request ~config ~error_handler ~response_handler
-          req in
+        Httpaf.Client_connection.request ~config ~error_handler
+          ~response_handler req in
       Lwt.async (fun () ->
           Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
