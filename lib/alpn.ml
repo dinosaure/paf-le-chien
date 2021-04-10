@@ -85,7 +85,7 @@ let error_handler_v2 edn f ?request error
     | _ -> assert false in
   f edn ?request (error :> server_error) response
 
-let serve info ~error_handler ~request_handler accept close =
+let service info ~error_handler ~request_handler accept close =
   let connection flow =
     match info.alpn flow with
     | Some "http/1.0" | Some "http/1.1" | None ->
