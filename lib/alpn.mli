@@ -81,7 +81,7 @@ type 'flow info = {
         R.T flow
     ]} *)
 
-val serve :
+val service :
   'flow info ->
   error_handler:
     (string ->
@@ -93,7 +93,7 @@ val serve :
   ('t -> ('flow, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
   't Paf.service
-(** [serve info ~error_handler ~request_handler accept close] creates a new
+(** [service info ~error_handler ~request_handler accept close] creates a new
     {!Paf.service} over the {i socket} ['t]. From the given implementation of
     [accept] and [close], we are able to instantiate the {i main loop}. Then,
     from the given [info], we extract informations such the application layer
@@ -104,7 +104,48 @@ val serve :
     - [Some "h2"], we launch an [h2] service
 
     The user is able to identify which protocol we launched by {!resd_handler}.
-    The returned service can be run with {!Paf.serve}. *)
+    The returned service can be run with {!Paf.serve}. Here is an example with
+    [Lwt_unix.file_descr] and the TCP/IP transmission protocol (without ALPN
+    negotiation):
+
+    {[
+      let _, protocol
+        : Unix.sockaddr Mimic.value
+          * (Unix.sockaddr, Lwt_unix.file_descr) Mimic.protocol
+        = Mimic.register ~name:"lwt-tcp" (module TCP)
+
+      let accept t =
+        Lwt.catch begin fun () ->
+          Lwt_unix.accept >>= fun (socket, _) ->
+          Lwt.return_ok socket
+        end @@ function
+        | Unix.Unix_error (err, f, v) ->
+          Lwt.return_error (`Unix (err, f, v))
+        | exn -> raise exn
+
+      let info =
+        let module R = (val Mimic.register protocol) in
+        { Alpn.alpn= const None
+        ; Alpn.peer= (fun socket ->
+          sockaddr_to_string (Lwt_unix.getpeername socket))
+        ; Alpn.injection=
+          (fun socket -> R.T socket) }
+
+      let service = Alpn.service info
+        ~error_handler
+        ~request_handler
+        accept Lwt_unix.close
+
+      let fiber =
+        let t = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+        Lwt_unix.bind t (Unix.ADDR_INET (Unix.inet_addr_loopback, 8080))
+        >>= fun () ->
+        let `Initialized th = Paf.serve
+          ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
+          service t in th
+
+      let () = Lwt_main.run fiber
+    ]} *)
 
 type client_error =
   [ `Exn of exn
@@ -125,4 +166,25 @@ val run :
 (** [run ~sleep ?alpn ~error_handler ~response_handler edn req flow] tries
     communitate to [edn] via [flow] with a certain protocol according to the
     given [alpn] value and the given request. It returns the body of the request
-    to allow the user to write on it (and communicate then with the server). *)
+    to allow the user to write on it (and communicate then with the server).
+
+    [run] does only the ALPN dispatch. It does not instantiate the connection
+    and it does not try to upgrade the protocol. It just choose the right HTTP
+    protocol according to:
+
+    - the given [alpn] value
+    - the given [request] (if you want to communicate via HTTP/1.1 or H2)
+
+    Here is an example with [mimic]:
+
+    {[
+      let run uri request =
+        let ctx = ctx_of_uri uri in
+        (* See Mimic for more details. *)
+        Mimic.resolve ctx >>= function
+        | Error _ as err -> Lwt.return err
+        | Ok flow ->
+            run
+              ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
+              ?alpn:None ~error_handler ~response_handler uri request flow
+    ]} *)
