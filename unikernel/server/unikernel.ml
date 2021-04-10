@@ -18,8 +18,8 @@ module Make
   (StackV4 : Mirage_stack.V4)
   (Stack : Mirage_stack.V4V6) = struct
   module Resolver = Dns_client_mirage.Make(Random)(Time)(Mclock)(StackV4)
-  module Paf = Paf.Make(Time)(Stack)
-  module Letsencrypt = LE.Make(Time)(Paf)
+  module Paf = Paf_mirage.Make(Time)(Stack)
+  module Letsencrypt = LE.Make(Time)
   module Nss = Ca_certs_nss.Make(Pclock)
 
   let root =
@@ -47,7 +47,7 @@ module Make
     let tls   = Mimic.make ~name:"tls" in
 
     let ctx =
-      let open Letsencrypt in
+      let open Paf_cohttp in
       Mimic.empty
       |> Mimic.(fold Paf.tcp_edn Fun.[ req scheme; req stack; req ipaddr; dft port 80; ] ~k:tcp_connect)
       |> Mimic.(fold Paf.tls_edn Fun.[ req scheme; opt domain_name; dft tls root; req stack; req ipaddr; dft port 443; ]
@@ -55,9 +55,10 @@ module Make
       |> Mimic.(fold ipaddr Fun.[ req dns; req domain_name; ] ~k:dns_resolver)
       |> Mimic.add dns (Resolver.create stackv4)
       |> Mimic.add stack stackv4v6 in
-    Paf.init ~port:80 stackv4v6 >>= fun service ->
+    Paf.init ~port:80 stackv4v6 >>= fun t ->
+    let service = Paf.http_service ~error_handler Letsencrypt.request_handler in
     Lwt_switch.with_switch @@ fun stop ->
-    let `Initialized th = Paf.http ~stop ~request_handler:Letsencrypt.request_handler ~error_handler service in
+    let `Initialized th = Paf.serve ~stop service t in
     let fiber =
       Letsencrypt.provision_certificate ~production cfg ctx >>= fun res ->
       Lwt_switch.turn_off stop >>= fun () -> Lwt.return res in
@@ -71,19 +72,17 @@ module Make
 
   let rock stackv4 stackv4v6 v ~request_handler ~error_handler = match v with
     | HTTP port ->
-      Paf.init ~port stackv4v6 >>= fun service ->
-      let `Initialized th = Paf.http
-        ~error_handler:(fun _ -> error_handler)
-        ~request_handler:(fun _ -> request_handler)
-        service in th
+      Paf.init ~port stackv4v6 >>= fun t ->
+      let service = Paf.http_service ~error_handler:(fun _ -> error_handler)
+        (fun _ -> request_handler) in
+      let `Initialized th = Paf.serve service t in th
     | HTTPS (port, cfg) ->
       get_certificate ~production:(Key_gen.production ()) cfg stackv4 stackv4v6 >>= fun certificates ->
       let tls = Tls.Config.server ~certificates () in
-      Paf.init ~port stackv4v6 >>= fun service ->
-      let `Initialized th = Paf.https ~tls
-        ~error_handler:(fun _ -> error_handler)
-        ~request_handler:(fun _ -> request_handler)
-        service in th
+      Paf.init ~port stackv4v6 >>= fun t ->
+      let service = Paf.https_service ~tls ~error_handler:(fun _ -> error_handler)
+        (fun _ -> request_handler) in
+      let `Initialized th = Paf.serve service t in th
 
   let host v = let open Rresult in
     Domain_name.of_string v >>= Domain_name.host

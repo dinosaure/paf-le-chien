@@ -40,7 +40,7 @@ let minipaf =
     ~packages:[ package "ca-certs-nss"
               ; package "dns-client.mirage"
               ; package "paf"
-              ; package "paf" ~sublibs:[ "le "]
+              ; package "paf" ~sublibs:[ "le"; "mirage" ]
               ; package "rock" ]
     (console @-> random @-> time @-> mclock @-> pclock @-> stackv4 @-> stackv4v6 @-> job)
 
