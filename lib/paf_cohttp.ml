@@ -20,10 +20,9 @@ let default_ctx = Mimic.empty
 
 let httpaf_config = Mimic.make ~name:"httpaf-config"
 
-let error_handler mvar flow edn err =
-  Lwt.async @@ fun () -> Lwt_mvar.put mvar (flow, edn, err)
+let error_handler mvar err = Lwt.async @@ fun () -> Lwt_mvar.put mvar err
 
-let response_handler mvar pusher _edn resp body =
+let response_handler mvar pusher resp body =
   let on_eof () = pusher None in
   let rec on_read buf ~off ~len =
     let str = Bigstringaf.substring buf ~off ~len in
@@ -121,6 +120,15 @@ let with_transfer_encoding ~chunked (meth : Cohttp.Code.meth) body headers =
   | _, Some false, `Stream _, None ->
       invalid_arg "Impossible to transfer a stream with a content-length value"
 
+module Httpaf_Client_connection = struct
+  include Httpaf.Client_connection
+
+  let yield_reader _ = assert false
+
+  let next_read_operation t =
+    (next_read_operation t :> [ `Close | `Read | `Yield ])
+end
+
 let call ?(ctx = default_ctx) ?headers
     ?body:(cohttp_body = Cohttp_lwt.Body.empty) ?chunked meth uri =
   Log.debug (fun m -> m "Fill the context with %a." Uri.pp uri) ;
@@ -154,11 +162,13 @@ let call ?(ctx = default_ctx) ?headers
   | Error (#Mimic.error as err) ->
       Lwt.fail (Failure (Fmt.str "%a" Mimic.pp_error err))
   | Ok flow -> (
-      let httpaf_body =
-        Paf.request ~sleep ~config flow ()
-          ~error_handler:(error_handler mvar_err)
-          ~response_handler:(response_handler mvar_res pusher)
-          req in
+      let error_handler = error_handler mvar_err in
+      let response_handler = response_handler mvar_res pusher in
+      let httpaf_body, conn =
+        Httpaf.Client_connection.request ~config ~error_handler
+          ~response_handler req in
+      Lwt.async (fun () ->
+          Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
       Log.debug (fun m -> m "Body transmitted.") ;
       Lwt.pick
@@ -167,12 +177,11 @@ let call ?(ctx = default_ctx) ?headers
           (Lwt_mvar.take mvar_err >|= fun err -> `Error err);
         ]
       >>= function
-      | `Error (flow, _, `Exn exn) ->
-          Mimic.close flow >>= fun () -> Lwt.fail exn
-      | `Error (flow, _, `Invalid_response_body_length resp) ->
+      | `Error (`Exn exn) -> Mimic.close flow >>= fun () -> Lwt.fail exn
+      | `Error (`Invalid_response_body_length resp) ->
           Mimic.close flow >>= fun () ->
           Lwt.fail (Invalid_response_body_length resp)
-      | `Error (flow, _, `Malformed_response err) ->
+      | `Error (`Malformed_response err) ->
           Mimic.close flow >>= fun () -> Lwt.fail (Malformed_response err)
       | `Response resp ->
           Log.debug (fun m -> m "Response received.") ;
@@ -226,4 +235,8 @@ let post_form ?ctx:_ ?headers:_ ~params:_ _uri = assert false (* TODO *)
 
 let callv ?ctx:_ _uri _stream = assert false (* TODO *)
 
+[@@@warning "-32"]
+
 let sexp_of_ctx _ctx = assert false
+
+[@@@warning "+32"]

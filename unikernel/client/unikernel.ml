@@ -28,7 +28,7 @@ module Make
   (Pclock : Mirage_clock.PCLOCK)
   (Stack : Mirage_stack.V4V6)
   (Dns : DNS) (* XXX(dinosaure): ask @hannesm to provide a signature. *)
-  (Paf : Paf.S) = struct
+  (Paf : Paf_mirage.S) = struct
   module Client = Paf_cohttp
   module Nss = Ca_certs_nss.Make(Pclock)
 

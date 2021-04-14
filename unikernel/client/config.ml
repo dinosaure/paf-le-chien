@@ -4,11 +4,11 @@ type paf = Paf
 let paf = typ Paf
 
 let paf_conf () =
-  let packages = [ package "paf" ] in
+  let packages = [ package "paf" ~sublibs:[ "mirage" ] ] in
   impl @@ object
     inherit base_configurable
-    method ty = stackv4v6 @-> paf
-    method module_name = "Paf.Make"
+    method ty = time @-> stackv4v6 @-> paf
+    method module_name = "Paf_mirage.Make"
     method! packages = Key.pure packages
     method name = "paf"
   end
@@ -41,7 +41,7 @@ let minipaf =
               ; package "ca-certs-nss" ]
     (console @-> time @-> pclock @-> stackv4v6 @-> dns @-> paf @-> job)
 
-let paf stackv4v6 = paf_conf () $ stackv4v6
+let paf time stackv4v6 = paf_conf () $ time $ stackv4v6
 let dns random time mclock stackv4 = dns_conf () $ random $ time $ mclock $ stackv4
 
 let random = default_random
@@ -53,4 +53,4 @@ let stackv4v6 = generic_stackv4v6 default_network
 let stackv4 = generic_stackv4 default_network
 let dns = dns random time mclock stackv4
 
-let () = register "minipaf" [ minipaf $ console $ time $ pclock $ stackv4v6 $ dns $ paf stackv4v6 ]
+let () = register "minipaf" [ minipaf $ console $ time $ pclock $ stackv4v6 $ dns $ paf time stackv4v6 ]

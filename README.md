@@ -1,22 +1,25 @@
 ## Paf le chien - A MirageOS compatible layer for [HTTP/AF][httpaf]
 
-This library wants to provide an easy way to use HTTP/AF into a unikernel. It
-implements the global /loop/ with a protocol implementation.
+This library wants to provide an easy way to use HTTP/AF & H2 into a unikernel.
+It implements the global /loop/ with a protocol implementation.
 
 The protocol implementation is given by [Mimic][mimic] and should be the
-[mirage-tcpip][mirage-tcpip] implementation - however, it can be something else.
+[mirage-tcpip][mirage-tcpip] implementation - however, it can be something
+else.
 
 It does the composition between the TLS encryption layer and the
-[StackV4V6][stackv4v6] implementation to provide a way to initiate a TLS server.
+[StackV4V6][stackv4v6] implementation to provide a way to initiate a TLS
+server.
 
 ```ocaml
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
-  module Paf = Paf.make(Time)(Stack)
+  module P = Paf_mirage.make(Time)(Stack)
 
   let start stack =
-    let* service = Paf.init ~port:80 stack in
-    let `Initialized t = Paf.http ~request_handler ~error_handler in
-    t
+    let* t = P.init ~port:80 stack in
+    let service = P.http_service ~error_handler request_handler in
+    let `Initialized th = P.serve service t in
+    th
 end
 
 (* For UNIX with mirage-time-unix & tcpip.stack-socket *)
@@ -25,8 +28,10 @@ include Make (Time) (Tcpip_stack_socket.V4V6)
 
 let stack () =
   let open Tcpip_stack_socket.V4V6 in
-  UDP.connect ~ipv4_only:false ~ipv6_only:false Ipaddr.V4.Prefix.global None >>= fun udp ->
-  TCP.connect ~ipv4_only:false ~ipv6_only:false Ipaddr.V4.Prefix.global None >>= fun tcp ->
+  UDP.connect ~ipv4_only:false ~ipv6_only:false
+    Ipaddr.V4.Prefix.global None >>= fun udp ->
+  TCP.connect ~ipv4_only:false ~ipv6_only:false
+    Ipaddr.V4.Prefix.global None >>= fun tcp ->
   connect udp tcp
 
 let () = Lwt_main.run (stack >>= start)
@@ -38,16 +43,16 @@ layer or not.
 
 ### Mimic
 
-Paf wants to provide an agnostic implementation of HTTP with the ability to launch
-a server or a client from an user-defined context: a `Mimic.ctx`. It does not exist
-one and unique way to use Paf because the context can be:
+Paf wants to provide an agnostic implementation of HTTP with the ability to
+launch a server or a client from an user-defined context: a `Mimic.ctx`. It
+does not exist one and unique way to use Paf because the context can be:
 - a MirageOS
 - a simple executable
 - something else like a JavaScript script (with `js_of_ocaml`)
 
-Mimic ensures the ability to gives a [Mirage_flow.S][mirage-flow] to Paf (client
-side). The underlying implementation of this /flow/ depends on what the user
-wants. It can be:
+Mimic ensures the ability to gives a [Mirage_flow.S][mirage-flow] to Paf
+(client side). The underlying implementation of this /flow/ depends on what the
+user wants. It can be:
 - [ocaml-tls][ocaml-tls]
 - [lwt_ssl][lwt_ssl]
 - [mirage-tcpip][mirage-tcpip]
@@ -66,14 +71,21 @@ module Unix_domain_socket : Mimic.Mirage_protocol.S
   with type flow = Unix.file_descr
    and type endpoint = Fpath.t
 
-let unix_domain_socket = Mimic.register ~name:"unix-domain-socket" (module Unix_domain_socket)
+let unix_domain_socket =
+  Mimic.register ~name:"unix-domain-socket" (module Unix_domain_socket)
 
 let ctx =
   Mimic.add unix_domain_socket 
     (Fpath.v "/var/my_domain.sock") Mimic.empty
     
 let run =
-  Paf.request ~ctx ... req
+  Mimic.resolve ~ctx >>= function
+  | Error _ as err -> Lwt.return err
+  | Ok flow ->
+    let body, conn = Httpaf.Client_connection.request ?config:None req
+      ~error_handler ~response_handler in
+    Paf.run (module Httpaf.Client_connection) ~sleep conn flow >>= fun () ->
+    Lwt.return_ok body
 ```
 
 ### CoHTTP layer
@@ -91,14 +103,76 @@ let cfg =
 
 let ctx = ... (* see [mimic] *)
 
+module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
+
 let get_tls_certificate () =
   Lwt_switch.with_switch @@ fun stop ->
-  let* service = Paf.init ~port:80 stack in
-  let `Initialized th = Paf.http ~stop ~request_handler:LE.request_handler ~error_handler service in
+  let* t = P.init ~port:80 stack in
+  let service = P.http_service
+    ~error_handler
+    LE.request_handler in
+  let `Initialized th = P.serve ~stop service in
   let fiber =
     LE.provision_certificate ~production:false cfg ctx >>= fun res ->
     Lwt_switch.turn_off stop >>= fun () -> Lwt.return res in
   Lwt.both (th, fiber) >>= fun (_, tls) -> Lwt.return tls
+```
+
+### Application Layer Protocol Negotiation
+
+Paf provides the logic behind ALPN according a _certain_ TLS/SSL
+implementation. In other words, Paf is able to correctly dispatch which
+protocol the client wants without a requirement of [ocaml-tls][ocaml-tls] or
+[lwt_ssl][lwt_ssl]. The module [Alpn] a HTTP service which handles:
+- HTTP/1.0
+- HTTP/1.1
+- H2
+
+[Alpn] requires:
+- the `accept` and the `close` function
+- a way to extract the result of the Application Layer Protocol Negotiation
+- the Mimic's _injection_
+- `error_handler` and `request_handler` which handle HTTP/1.0, HTTP/1.1 and
+  H2 requests
+
+Here is an example with HTTP (without TLS):
+```ocaml
+let _, protocol
+  : Unix.sockaddr Mimic.value
+    * (Unix.sockaddr, Lwt_unix.file_descr) Mimic.protocol
+  = Mimic.register ~name:"lwt-tcp" (module TCP)
+
+let accept t =
+  Lwt.catch begin fun () ->
+    Lwt_unix.accept >>= fun (socket, _) ->
+    Lwt.return_ok socket
+  end @@ function
+  | Unix.Unix_error (err, f, v) ->
+    Lwt.return_error (`Unix (err, f, v))
+  | exn -> raise exn
+
+let info =
+  let module R = (val Mimic.register protocol) in
+  { Alpn.alpn= const None
+  ; Alpn.peer= (fun socket ->
+    sockaddr_to_string (Lwt_unix.getpeername socket))
+  ; Alpn.injection=
+    (fun socket -> R.T socket) }
+
+let service = Alpn.service info
+  ~error_handler
+  ~request_handler
+  accept Lwt_unix.close
+
+let fiber =
+  let t = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Lwt_unix.bind t (Unix.ADDR_INET (Unix.inet_addr_loopback, 8080))
+  >>= fun () ->
+  let `Initialized th = Paf.serve
+    ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
+    service t in th
+
+let () = Lwt_main.run fiber
 ```
 
 ### Tests & Benchmark

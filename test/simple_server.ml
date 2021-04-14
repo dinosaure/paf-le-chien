@@ -24,7 +24,7 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let () = Sys.set_signal sigpipe Sys.Signal_ignore
 
-module Paf = Paf.Make (Tcpip_stack_socket.V4V6)
+module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
 module Ke = Ke.Rke
 
 let getline queue =
@@ -117,7 +117,7 @@ let request_handler large (ip, port) reqd =
 let error_handler (ip, port) ?request:_ error respond =
   let open Httpaf in
   match error with
-  | `Exn (Paf.Error err) ->
+  | `Exn (Paf.Flow err) ->
       let contents =
         Fmt.strf "Internal server error from <%a:%d>: %a" Ipaddr.pp ip port
           Mimic.pp_error err in
@@ -150,11 +150,9 @@ let () = at_exit (fun () -> try Unix.close fd_4343 with _exn -> ())
 let unlock fd = Unix.lockf fd Unix.F_ULOCK 0
 
 let server_http large stack =
-  Paf.init ~port:8080 stack >>= fun service ->
-  let (`Initialized th) =
-    Paf.http
-      ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
-      ~error_handler ~request_handler:(request_handler large) service in
+  P.init ~port:8080 stack >>= fun service ->
+  let http = P.http_service ~error_handler (request_handler large) in
+  let (`Initialized th) = P.serve http service in
   unlock fd_8080 ;
   th
 
@@ -174,12 +172,9 @@ let server_https cert key large stack =
   with
   | Ok certs, Ok (`RSA key) ->
       let tls = Tls.Config.server ~certificates:(`Single (certs, key)) () in
-      Paf.init ~port:4343 stack >>= fun service ->
-      let (`Initialized th) =
-        Paf.https
-          ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
-          ~tls ~error_handler ~request_handler:(request_handler large) service
-      in
+      P.init ~port:4343 stack >>= fun service ->
+      let https = P.https_service ~tls ~error_handler (request_handler large) in
+      let (`Initialized th) = P.serve https service in
       unlock fd_4343 ;
       th
   | _ -> invalid_arg "Invalid certificate or key"

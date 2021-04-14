@@ -2,20 +2,32 @@
  (name paf)
  (public_name paf)
  (modules paf)
- (libraries tls-mirage mirage-time mirage-stack ke httpaf mimic))
+ (libraries faraday bigstringaf ke mimic))
+
+(library
+ (name alpn)
+ (public_name paf.alpn)
+ (modules alpn)
+ (libraries paf httpaf h2))
+
+(library
+ (name paf_mirage)
+ (public_name paf.mirage)
+ (modules paf_mirage)
+ (libraries paf tls-mirage mirage-time mirage-stack paf.alpn))
 
 (library
  (name paf_cohttp)
  (public_name paf.cohttp)
  (modules paf_cohttp)
- (libraries paf cohttp-lwt))
+ (libraries ipaddr domain-name paf httpaf cohttp-lwt))
 
 (library
  (name le)
  (wrapped false)
  (public_name paf.le)
  (modules lE)
- (libraries paf.cohttp emile letsencrypt))
+ (libraries mirage-time paf.cohttp duration tls emile letsencrypt))
 
 ; (library
 ;  (name mirage_paf)

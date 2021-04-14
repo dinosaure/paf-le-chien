@@ -1,44 +1,85 @@
-module type HTTPAF = sig
-  type flow = Mimic.flow
+module type RUNTIME = sig
+  type t
 
-  exception Error of Mimic.error
+  val next_read_operation : t -> [ `Read | `Yield | `Close ]
+  (** [next_read_connection t] returns a value describing the next operation
+      that the caller should conduit on behalf of the connection. *)
 
-  val create_server_connection_handler :
-    sleep:(int64 -> unit Lwt.t) ->
-    ?config:Httpaf.Config.t ->
-    request_handler:('endpoint -> Httpaf.Server_connection.request_handler) ->
-    error_handler:('endpoint -> Httpaf.Server_connection.error_handler) ->
-    'endpoint ->
-    flow ->
-    unit Lwt.t
+  val read : t -> Bigstringaf.t -> off:int -> len:int -> int
+  (** [read t bigstring ~off ~len] reads bytes of input from the provided range
+      of [bigstring] an returns the number of bytes consumed by the connection.
+      {!read} should be called after {!next_read_operation} returns a [`Read]
+      value an additional input is available for the connection to consume. *)
 
-  val request :
-    sleep:(int64 -> unit Lwt.t) ->
-    ?config:Httpaf.Config.t ->
-    flow ->
-    'endpoint ->
-    Httpaf.Request.t ->
-    error_handler:(flow -> 'endpoint -> Httpaf.Client_connection.error_handler) ->
-    response_handler:('endpoint -> Httpaf.Client_connection.response_handler) ->
-    [ `write ] Httpaf.Body.t
+  val read_eof : t -> Bigstringaf.t -> off:int -> len:int -> int
+  (** [read_eof t bigstring ~off ~len] reads bytes of input from the provided
+      range of [bigstring] and returns the number of bytes consumed by the
+      connection. {!read_eof} should be called after {!next_read_operation}
+      returns a [`Read] and an EOF has been received from the communication
+      channel. The connection will attempt to consume any buffered input and
+      then shutdown the HTTP parser for the connection. *)
+
+  val yield_reader : t -> (unit -> unit) -> unit
+  (** [yield_reader t continue] registers with the connection to call [continue]
+      when reading should resume. {!yield_reader} should be called after
+      {!next_read_operation} returns a [`Yield] value. *)
+
+  val next_write_operation :
+    t -> [ `Write of Bigstringaf.t Faraday.iovec list | `Yield | `Close of int ]
+  (** [next_write_operation t] returns a value describing the next operation
+      that the caller should conduct on behalf the connection. *)
+
+  val report_write_result : t -> [ `Ok of int | `Closed ] -> unit
+  (** [report_write_result t result] reports the result of the latest write
+      attempt to the connection. {!report_write_result} should be called after a
+      call to {!next_write_operation} that returns a [`Write buffer] value.
+
+      - [`Ok n] indicates that the caller successfully wrote [n] bytes of output
+        from the buffer that the caller was provided by {!next_write_operation}
+        that returns a [`Write buffer] value.
+      - [`Closed] indicates that the output destination will no longer accept
+        bytes from the write processor. *)
+
+  val yield_writer : t -> (unit -> unit) -> unit
+  (** [yield_writer t continue] registers with the connection to call [continue]
+      when writing should resume. {!yield_writer} should be called after
+      {!next_write_operation} returns a [`Yield] value. *)
+
+  val report_exn : t -> exn -> unit
+  (** [report_exn t exn] reports that an error [exn] has been caught and that it
+      has been attributed to [t]. Calling this function will switch [t] into an
+      error state. Depending on the tate [t] is transitioning from, it may call
+      its error handler before terminating the connection. *)
+
+  val is_closed : t -> bool
+  (** [is_closed t] is [true] if both the read and write processors have been
+      shutdown. When this is the case {!next_read_operation} will return
+      [`Close _] and {!next_write_operation} will return a [`Write _] until all
+      buffered output has been flushed, at which point it will return [`Close]. *)
+
+  val shutdown : t -> unit
 end
 
-module Core : HTTPAF = struct
+type sleep = int64 -> unit Lwt.t
+
+type 'conn runtime = (module RUNTIME with type t = 'conn)
+
+exception Flow of Mimic.error
+
+module Server (Runtime : RUNTIME) : sig
+  val server : sleep:sleep -> Runtime.t -> Mimic.flow -> unit Lwt.t
+end = struct
   let src = Logs.Src.create "paf"
 
   module Log = (val Logs.src_log src : Logs.LOG)
 
   type server = {
     flow : Mimic.flow;
-    sleep : int64 -> unit Lwt.t;
+    sleep : sleep;
     queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t;
     mutable rd_closed : bool;
     mutable wr_closed : bool;
   }
-
-  and flow = Mimic.flow
-
-  exception Error of Mimic.error
 
   open Rresult
   open Lwt.Infix
@@ -65,7 +106,7 @@ module Core : HTTPAF = struct
           Mimic.read flow.flow >>= function
           | Error (#Mimic.error as err) ->
               flow.rd_closed <- true ;
-              safely_close flow >>= fun () -> Lwt.fail (Error err)
+              safely_close flow >>= fun () -> raise (Flow err)
           | Ok `Eof ->
               let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
               Log.debug (fun m -> m "[`read] Connection closed.") ;
@@ -118,72 +159,78 @@ module Core : HTTPAF = struct
       Mimic.close flow.flow)
     else Lwt.return ()
 
-  let create_server_connection_handler ~sleep ?(config = Httpaf.Config.default)
-      ~request_handler ~error_handler =
-    let connection_handler edn flow =
-      let module Server_connection = Httpaf.Server_connection in
-      let connection =
-        Server_connection.create ~config ~error_handler:(error_handler edn)
-          (request_handler edn) in
-      let queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
-      let flow = { flow; sleep; queue; rd_closed = false; wr_closed = false } in
-      let rd_exit, notify_rd_exit = Lwt.task () in
-      let wr_exit, notify_wr_exit = Lwt.task () in
-      let rec rd_fiber () =
-        let rec go () =
-          match Server_connection.next_read_operation connection with
-          | `Read ->
-              Log.debug (fun m -> m "next read operation: `read") ;
-              recv flow
-                ~read:(Server_connection.read connection)
-                ~read_eof:(Server_connection.read_eof connection)
-              >>= fun _ -> go ()
-          | `Yield ->
-              Log.debug (fun m -> m "next read operation: `yield") ;
-              Server_connection.yield_reader connection rd_fiber ;
-              Lwt.return ()
-          | `Close ->
-              Log.debug (fun m -> m "next read operation: `close") ;
-              Lwt.wakeup_later notify_rd_exit () ;
-              flow.rd_closed <- true ;
-              safely_close flow in
-        Lwt.async @@ fun () ->
-        Lwt.catch go (fun exn ->
-            Server_connection.report_exn connection exn ;
-            Lwt.return ()) in
-      let rec wr_fiber () =
-        let rec go () =
-          match Server_connection.next_write_operation connection with
-          | `Write iovecs ->
-              Log.debug (fun m -> m "next write operation: `write") ;
-              send flow iovecs >>= fun res ->
-              Server_connection.report_write_result connection res ;
-              go ()
-          | `Yield ->
-              Log.debug (fun m -> m "next write operation: `yield") ;
-              Server_connection.yield_writer connection wr_fiber ;
-              Lwt.return ()
-          | `Close _ ->
-              Log.debug (fun m -> m "next write operation: `close") ;
-              Lwt.wakeup_later notify_wr_exit () ;
-              flow.wr_closed <- true ;
-              safely_close flow in
-        Lwt.async @@ fun () ->
-        Lwt.catch go (fun exn ->
-            Server_connection.report_write_result connection `Closed ;
-            Server_connection.report_exn connection exn ;
-            Lwt.return ()) in
-      rd_fiber () ;
-      wr_fiber () ;
-      let threads = [ rd_exit; wr_exit ] in
-      Lwt.join threads >>= fun () ->
-      Log.debug (fun m -> m "End of transmission.") ;
-      close flow in
-    connection_handler
+  let server ~sleep connection flow =
+    let queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
+    let flow = { flow; sleep; queue; rd_closed = false; wr_closed = false } in
+    let rd_exit, notify_rd_exit = Lwt.task () in
+    let wr_exit, notify_wr_exit = Lwt.task () in
+    let rec rd_fiber () =
+      let rec go () =
+        match Runtime.next_read_operation connection with
+        | `Read ->
+            Log.debug (fun m -> m "next read operation: `read") ;
+            recv flow ~read:(Runtime.read connection)
+              ~read_eof:(Runtime.read_eof connection)
+            >>= fun _ -> go ()
+        | `Yield ->
+            Log.debug (fun m -> m "next read operation: `yield") ;
+            Runtime.yield_reader connection rd_fiber ;
+            Lwt.return ()
+        | `Close ->
+            Log.debug (fun m -> m "next read operation: `close") ;
+            Lwt.wakeup_later notify_rd_exit () ;
+            flow.rd_closed <- true ;
+            safely_close flow in
+      Lwt.async @@ fun () ->
+      Lwt.catch go (fun exn ->
+          Runtime.report_exn connection exn ;
+          Lwt.return ()) in
+    let rec wr_fiber () =
+      let rec go () =
+        match Runtime.next_write_operation connection with
+        | `Write iovecs ->
+            Log.debug (fun m -> m "next write operation: `write") ;
+            send flow iovecs >>= fun res ->
+            Runtime.report_write_result connection res ;
+            go ()
+        | `Yield ->
+            Log.debug (fun m -> m "next write operation: `yield") ;
+            Runtime.yield_writer connection wr_fiber ;
+            Lwt.return ()
+        | `Close _ ->
+            Log.debug (fun m -> m "next write operation: `close") ;
+            Lwt.wakeup_later notify_wr_exit () ;
+            flow.wr_closed <- true ;
+            safely_close flow in
+      Lwt.async @@ fun () ->
+      Lwt.catch go (fun exn ->
+          Runtime.report_write_result connection `Closed ;
+          Runtime.report_exn connection exn ;
+          Lwt.return ()) in
+    rd_fiber () ;
+    wr_fiber () ;
+    let threads = [ rd_exit; wr_exit ] in
+    Lwt.join threads >>= fun () ->
+    Log.debug (fun m -> m "End of transmission.") ;
+    close flow
+end
+
+module Client (Runtime : RUNTIME) : sig
+  val run : sleep:sleep -> Runtime.t -> Mimic.flow -> unit Lwt.t
+end = struct
+  open Lwt.Infix
+
+  let src = Logs.Src.create "paf"
+
+  module Log = (val Logs.src_log src : Logs.LOG)
+
+  let blit src src_off dst dst_off len =
+    let dst = Cstruct.of_bigarray ~off:dst_off ~len dst in
+    Cstruct.blit src src_off dst 0 len
 
   type client = {
     flow : Mimic.flow;
-    sleep : int64 -> unit Lwt.t;
+    sleep : sleep;
     queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t;
     mutable rd_closed : bool;
     mutable wr_closed : bool;
@@ -251,7 +298,7 @@ module Core : HTTPAF = struct
     Ke.Rke.compress flow.queue ;
     go ()
 
-  let writev ?(timeout = 1000000000L) flow iovecs =
+  let writev ?(timeout = 1_000_000_000L) flow iovecs =
     let rec go acc = function
       | [] -> Lwt.return (`Ok acc)
       | { Faraday.buffer; off; len } :: rest -> (
@@ -275,24 +322,18 @@ module Core : HTTPAF = struct
       Mimic.close flow.flow)
     else Lwt.return ()
 
-  let request ~sleep ?(config = Httpaf.Config.default) flow edn request
-      ~error_handler ~response_handler =
-    let module Client_connection = Httpaf.Client_connection in
-    let request_body, connection =
-      Client_connection.request ~config request
-        ~error_handler:(error_handler flow edn)
-        ~response_handler:(response_handler edn) in
-    let queue = Ke.Rke.create ~capacity:config.read_buffer_size Bigarray.char in
+  let run ~sleep connection flow =
+    let queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
     let flow = { flow; sleep; queue; rd_closed = false; wr_closed = false } in
     let read_loop_exited, notify_read_loop_exited = Lwt.wait () in
 
-    let rd_loop () =
+    let rec rd_loop () =
       let rec go () =
-        match Client_connection.next_read_operation connection with
+        match Runtime.next_read_operation connection with
         | `Read -> (
             Log.debug (fun m -> m "[`read] start to read.") ;
-            let read = Client_connection.read connection in
-            let read_eof = Client_connection.read_eof connection in
+            let read = Runtime.read connection in
+            let read_eof = Runtime.read_eof connection in
             recv flow ~read ~read_eof >>= function
             | `Closed ->
                 Log.err (fun m -> m "[`read] connection was closed by peer.") ;
@@ -300,10 +341,14 @@ module Core : HTTPAF = struct
                 flow.rd_closed <- true ;
                 safely_close flow
             | _ -> go ())
+        | `Yield ->
+            Log.debug (fun m -> m "next read operation: `yield") ;
+            Runtime.yield_reader connection rd_loop ;
+            Lwt.return ()
         | `Close ->
             Log.debug (fun m -> m "[`read] close the connection.") ;
-            let read = Client_connection.read connection in
-            let read_eof = Client_connection.read_eof connection in
+            let read = Runtime.read connection in
+            let read_eof = Runtime.read_eof connection in
             drain flow ~read ~read_eof >>= fun () ->
             Lwt.wakeup_later notify_read_loop_exited () ;
             flow.rd_closed <- true ;
@@ -313,23 +358,23 @@ module Core : HTTPAF = struct
               Log.err (fun m ->
                   m "report a read error: %s" (Printexc.to_string exn)) ;
               Lwt.wakeup_later notify_read_loop_exited () ;
-              Client_connection.report_exn connection exn ;
-              Client_connection.shutdown connection ;
+              Runtime.report_exn connection exn ;
+              Runtime.shutdown connection ;
               Lwt.return ())) in
     let writev = writev flow in
     let write_loop_exited, notify_write_loop_exited = Lwt.wait () in
 
     let rec wr_loop () =
       let rec go () =
-        match Client_connection.next_write_operation connection with
+        match Runtime.next_write_operation connection with
         | `Write iovecs ->
             Log.debug (fun m -> m "[`write] start to write.") ;
             writev iovecs >>= fun res ->
-            Client_connection.report_write_result connection res ;
+            Runtime.report_write_result connection res ;
             go ()
         | `Yield ->
             Log.debug (fun m -> m "[`write] yield.") ;
-            Client_connection.yield_writer connection wr_loop ;
+            Runtime.yield_writer connection wr_loop ;
             Lwt.return ()
         | `Close _ ->
             Log.debug (fun m -> m "[`write] close.") ;
@@ -340,256 +385,80 @@ module Core : HTTPAF = struct
           Lwt.catch go (fun exn ->
               Log.err (fun m ->
                   m "report a write error: %s" (Printexc.to_string exn)) ;
-              Client_connection.report_exn connection exn ;
+              Runtime.report_exn connection exn ;
               Lwt.return ())) in
     wr_loop () ;
     rd_loop () ;
-    Lwt.async (fun () ->
-        Lwt.join [ read_loop_exited; write_loop_exited ] >>= fun () ->
-        Log.debug (fun m -> m "End of transmission.") ;
-        close flow) ;
-    request_body
+    Lwt.join [ read_loop_exited; write_loop_exited ] >>= fun () ->
+    Log.debug (fun m -> m "End of transmission.") ;
+    close flow
 end
 
-module type S = sig
-  exception Error of Mimic.error
+type impl = Runtime : 'conn runtime * 'conn -> impl
 
-  type stack
+type 't service =
+  | Service : {
+      accept : 't -> ('flow, ([> `Closed ] as 'error)) result Lwt.t;
+      connection : 'flow -> (Mimic.flow * impl, 'error) result Lwt.t;
+      close : 't -> unit Lwt.t;
+    }
+      -> 't service
 
-  type service
+and ('t, 'flow, 'error) posix = {
+  accept : 't -> ('flow, 'error) result Lwt.t;
+  close : 't -> unit Lwt.t;
+}
+  constraint 'error = [> `Closed ]
 
-  val init : port:int -> stack -> service Lwt.t
+let service connection accept close = Service { accept; connection; close }
 
-  val http :
-    sleep:(int64 -> unit Lwt.t) ->
-    ?config:Httpaf.Config.t ->
+open Rresult
+open Lwt.Infix
+
+let ( >>? ) = Lwt_result.bind
+
+let serve_when_ready :
+    type t flow.
+    (t, flow, _) posix ->
     ?stop:Lwt_switch.t ->
-    error_handler:(Ipaddr.t * int -> Httpaf.Server_connection.error_handler) ->
-    request_handler:(Ipaddr.t * int -> Httpaf.Server_connection.request_handler) ->
-    service ->
-    [ `Initialized of unit Lwt.t ]
+    handler:(flow -> unit Lwt.t) ->
+    t ->
+    [ `Initialized of unit Lwt.t ] =
+ fun service ?stop ~handler t ->
+  let { accept; close } = service in
+  `Initialized
+    (let switched_off =
+       let t, u = Lwt.wait () in
+       Lwt_switch.add_hook stop (fun () ->
+           Lwt.wakeup_later u (Ok `Stopped) ;
+           Lwt.return_unit) ;
+       t in
+     let rec loop () =
+       let accept = accept t >>? fun flow -> Lwt.return_ok (`Flow flow) in
+       accept >>? function
+       | `Flow flow ->
+           Lwt.async (fun () -> handler flow) ;
+           Lwt.pause () >>= loop in
+     let stop_result =
+       Lwt.pick [ switched_off; loop () ] >>= function
+       | Ok `Stopped -> close t >>= fun () -> Lwt.return_ok ()
+       | Error _ as err -> close t >>= fun () -> Lwt.return err in
+     stop_result >>= function Ok () | Error (`Closed | _) -> Lwt.return_unit)
 
-  val https :
-    sleep:(int64 -> unit Lwt.t) ->
-    tls:Tls.Config.server ->
-    ?config:Httpaf.Config.t ->
-    ?stop:Lwt_switch.t ->
-    error_handler:(Ipaddr.t * int -> Httpaf.Server_connection.error_handler) ->
-    request_handler:(Ipaddr.t * int -> Httpaf.Server_connection.request_handler) ->
-    service ->
-    [ `Initialized of unit Lwt.t ]
+let server : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
+ fun (module Runtime) ~sleep conn flow ->
+  let module Server = Server (Runtime) in
+  Server.server ~sleep conn flow
 
-  val tcp_edn : (stack * Ipaddr.t * int) Mimic.value
+let serve ~sleep ?stop service t =
+  let (Service { accept; connection; close }) = service in
+  let handler flow =
+    connection flow >>= function
+    | Ok (flow, Runtime (runtime, conn)) -> server runtime ~sleep conn flow
+    | Error _ -> Lwt.return_unit in
+  serve_when_ready ?stop ~handler { accept; close } t
 
-  val tls_edn :
-    ([ `host ] Domain_name.t option
-    * Tls.Config.client
-    * stack
-    * Ipaddr.t
-    * int)
-    Mimic.value
-
-  val request :
-    sleep:(int64 -> unit Lwt.t) ->
-    ?config:Httpaf.Config.t ->
-    ctx:Mimic.ctx ->
-    error_handler:
-      (Mimic.flow ->
-      (Ipaddr.t * int) option ->
-      Httpaf.Client_connection.error_handler) ->
-    response_handler:
-      ((Ipaddr.t * int) option -> Httpaf.Client_connection.response_handler) ->
-    Httpaf.Request.t ->
-    ([ `write ] Httpaf.Body.t, [> Mimic.error ]) result Lwt.t
-end
-
-module Make (Stack : Mirage_stack.V4V6) : S with type stack = Stack.t = struct
-  open Lwt.Infix
-
-  module TCP = struct
-    let src = Logs.Src.create "paf-tls"
-
-    module Log = (val Logs.src_log src : Logs.LOG)
-
-    include Stack.TCP
-
-    type endpoint = Stack.t * Ipaddr.t * int
-
-    type nonrec write_error =
-      [ `Write of write_error | `Connect of error | `Closed ]
-
-    let pp_write_error ppf = function
-      | `Write err | (`Closed as err) -> pp_write_error ppf err
-      | `Connect err -> pp_error ppf err
-
-    let write flow cs =
-      write flow cs >>= function
-      | Ok _ as v -> Lwt.return v
-      | Error err -> Lwt.return_error (`Write err)
-
-    let writev flow css =
-      writev flow css >>= function
-      | Ok _ as v -> Lwt.return v
-      | Error err -> Lwt.return_error (`Write err)
-
-    let connect (stack, ipaddr, port) =
-      let t = Stack.tcp stack in
-      Log.debug (fun m ->
-          m "Initiate a TCP connection to: %a:%d." Ipaddr.pp ipaddr port) ;
-      create_connection t (ipaddr, port) >>= function
-      | Ok _ as v -> Lwt.return v
-      | Error err -> Lwt.return_error (`Connect err)
-  end
-
-  module TLS = struct
-    let src = Logs.Src.create "paf-tls"
-
-    module Log = (val Logs.src_log src : Logs.LOG)
-
-    include Tls_mirage.Make (Stack.TCP)
-
-    type endpoint =
-      [ `host ] Domain_name.t option
-      * Tls.Config.client
-      * Stack.t
-      * Ipaddr.t
-      * int
-
-    let connect (domain_name, cfg, stack, ipaddr, port) =
-      let t = Stack.tcp stack in
-      Log.debug (fun m ->
-          m "Initiate a TCP connection for TLS to: %a:%d." Ipaddr.pp ipaddr port) ;
-      Stack.TCP.create_connection t (ipaddr, port) >>= function
-      | Error err ->
-          Log.err (fun m ->
-              m "Got an error when we try to connect (TCP) to %a:%d: %a"
-                Ipaddr.pp ipaddr port Stack.TCP.pp_error err) ;
-          Lwt.return_error (`Read err)
-      | Ok flow ->
-          Log.debug (fun m ->
-              m "Initiate a TLS connection to: %a:%d." Ipaddr.pp ipaddr port) ;
-          client_of_flow cfg
-            ?host:(Option.map Domain_name.to_string domain_name)
-            flow
-  end
-
-  let src = Logs.Src.create "paf-layer"
-
-  module Log = (val Logs.src_log src : Logs.LOG)
-
-  type stack = Stack.t
-
-  let tcp_edn, tcp_protocol = Mimic.register ~name:"tcp" (module TCP)
-
-  let tls_edn, tls_protocol =
-    Mimic.register ~priority:10 ~name:"tls" (module TLS)
-
-  include Core
-
-  type service = {
-    stack : Stack.t;
-    queue : Stack.TCP.flow Queue.t;
-    condition : unit Lwt_condition.t;
-    mutex : Lwt_mutex.t;
-    mutable closed : bool;
-  }
-
-  let init ~port stack =
-    let queue = Queue.create () in
-    let condition = Lwt_condition.create () in
-    let mutex = Lwt_mutex.create () in
-    let listener flow =
-      Lwt_mutex.lock mutex >>= fun () ->
-      Queue.push flow queue ;
-      Lwt_condition.signal condition () ;
-      Lwt_mutex.unlock mutex ;
-      Lwt.return () in
-    Stack.listen_tcp ~port stack listener ;
-    Lwt.return { stack; queue; condition; mutex; closed = false }
-
-  let rec accept ({ queue; condition; mutex; _ } as t) =
-    Lwt_mutex.lock mutex >>= fun () ->
-    let rec await () =
-      if Queue.is_empty queue && not t.closed
-      then Lwt_condition.wait condition ~mutex >>= await
-      else Lwt.return_unit in
-    await () >>= fun () ->
-    match Queue.pop queue with
-    | flow ->
-        Lwt_mutex.unlock mutex ;
-        Lwt.return_ok flow
-    | exception Queue.Empty ->
-        if t.closed
-        then (
-          Lwt_mutex.unlock mutex ;
-          Lwt.return_error `Closed)
-        else (
-          Lwt_mutex.unlock mutex ;
-          accept t)
-
-  let close ({ stack; condition; _ } as t) =
-    t.closed <- true ;
-    Stack.disconnect stack >>= fun () ->
-    Lwt_condition.signal condition () ;
-    Lwt.return_unit
-
-  let ( >>? ) = Lwt_result.bind
-
-  let serve_when_ready ?stop ~handler service =
-    `Initialized
-      (let switched_off =
-         let t, u = Lwt.wait () in
-         Lwt_switch.add_hook stop (fun () ->
-             Lwt.wakeup_later u (Ok `Stopped) ;
-             Lwt.return_unit) ;
-         t in
-       let rec loop () =
-         let accept =
-           accept service >>? fun flow -> Lwt.return_ok (`Flow flow) in
-         accept >>? function
-         | `Flow flow ->
-             Lwt.async (fun () -> handler flow) ;
-             Lwt.pause () >>= loop in
-       let stop_result =
-         Lwt.pick [ switched_off; loop () ] >>= function
-         | Ok `Stopped -> close service >>= fun () -> Lwt.return_ok ()
-         | Error _ as err -> close service >>= fun () -> Lwt.return err in
-       stop_result >>= function Ok () | Error `Closed -> Lwt.return_unit)
-
-  module Tcp = (val Mimic.repr tcp_protocol)
-
-  module Tls = (val Mimic.repr tls_protocol)
-
-  let http ~sleep ?config ?stop ~error_handler ~request_handler service =
-    let handler socket =
-      let ipaddr, port = Stack.TCP.dst socket in
-      create_server_connection_handler ~sleep ?config ~error_handler
-        ~request_handler (ipaddr, port) (Tcp.T socket) in
-    serve_when_ready ?stop ~handler service
-
-  let https ~sleep ~tls ?config ?stop ~error_handler ~request_handler service =
-    let handler socket =
-      let ipaddr, port = Stack.TCP.dst socket in
-      TLS.server_of_flow tls socket >>= function
-      | Ok state ->
-          create_server_connection_handler ~sleep ?config ~error_handler
-            ~request_handler (ipaddr, port) (Tls.T state)
-      | Error _ -> Lwt.return_unit in
-    serve_when_ready ?stop ~handler service
-
-  let request ~sleep ?config ~ctx ~error_handler ~response_handler v =
-    Mimic.resolve ctx >>= function
-    | Error _ as err -> Lwt.return err
-    | Ok (Tcp.T socket as flow) ->
-        Logs.debug (fun m -> m "Connected to the peer.") ;
-        let ipaddr, port = Stack.TCP.dst socket in
-        Lwt.return_ok
-          (request ~sleep ?config flow
-             (Some (ipaddr, port))
-             v ~error_handler ~response_handler)
-    | Ok flow ->
-        Lwt.return_ok
-          (request ~sleep ?config flow None v ~error_handler ~response_handler)
-end
-
-include Core
+let run : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
+ fun (module Runtime) ~sleep conn flow ->
+  let module Client = Client (Runtime) in
+  Client.run ~sleep conn flow

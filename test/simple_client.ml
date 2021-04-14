@@ -4,9 +4,11 @@ let () = Logs.set_reporter (reporter Fmt.stderr)
 let () = Logs.set_level ~all:true (Some Logs.Debug)
 *)
 
+let failf fmt = Format.kasprintf failwith fmt
+
 let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
 
-module Paf = Paf.Make (Tcpip_stack_socket.V4V6)
+module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
 open Lwt.Infix
 
 let ( >>? ) x f =
@@ -14,34 +16,39 @@ let ( >>? ) x f =
 
 let ( <.> ) f g x = f (g x)
 
-let response_handler th_err ~f _ response body =
-  let buf = Buffer.create 0x100 in
-  let th, wk = Lwt.wait () in
-  let on_eof () =
-    Httpaf.Body.close_reader body ;
-    Lwt.wakeup_later wk () in
-  let rec on_read payload ~off ~len =
-    Buffer.add_string buf (Bigstringaf.substring payload ~off ~len) ;
-    Httpaf.Body.schedule_read body ~on_eof ~on_read in
-  Httpaf.Body.schedule_read body ~on_eof ~on_read ;
-  Lwt.async @@ fun () ->
-  Lwt.pick [ (th >|= fun () -> `Done); th_err ] >>= function
-  | `Done -> f response (Buffer.contents buf)
-  | _ ->
-      Httpaf.Body.close_reader body ;
-      Lwt.return_unit
+let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
+    [ `read ] Alpn.resp_handler -> unit = function
+  | Alpn.Resp_handler (Alpn.HTTP_1_0, _, _) -> failf "Invalid protocol HTTP/1.0"
+  | Alpn.Resp_handler (Alpn.HTTP_2_0, _, _) -> failf "Invalid protocol H2"
+  | Alpn.Resp_handler (Alpn.HTTP_1_1, response, body) -> (
+      let buf = Buffer.create 0x100 in
+      let th, wk = Lwt.wait () in
+      let on_eof () =
+        Httpaf.Body.close_reader body ;
+        Lwt.wakeup_later wk () in
+      let rec on_read payload ~off ~len =
+        Buffer.add_string buf (Bigstringaf.substring payload ~off ~len) ;
+        Httpaf.Body.schedule_read body ~on_eof ~on_read in
+      Httpaf.Body.schedule_read body ~on_eof ~on_read ;
+      Lwt.async @@ fun () ->
+      Lwt.pick [ (th >|= fun () -> `Done); th_err ] >>= function
+      | `Done -> f response (Buffer.contents buf)
+      | _ ->
+          Httpaf.Body.close_reader body ;
+          Lwt.return_unit)
 
 let failf fmt = Format.kasprintf (fun err -> raise (Failure err)) fmt
 
-let error_handler wk _ _ err =
-  Lwt.wakeup_later wk
-    (err :> [ `Body of string | `Done | Httpaf.Client_connection.error ]) ;
+let error_handler wk _ (err : Alpn.client_error) =
+  Lwt.wakeup_later wk (err :> [ `Body of string | `Done | Alpn.client_error ]) ;
   match err with
-  | `Exn (Paf.Error err) ->
+  | `Exn (Paf.Flow err) ->
       failf "Impossible to start a transmission: %a" Mimic.pp_error err
-  | `Invalid_response_body_length _ -> failf "Invalid response body-length"
+  | `Invalid_response_body_length_v1 _ | `Invalid_response_body_length_v2 _ ->
+      failf "Invalid response body-length"
   | `Malformed_response _ -> failf "Malformed response"
   | `Exn exn -> raise exn
+  | `Protocol_error (_error_code, _msg) -> failf "Protocol error"
 
 let anchors = []
 
@@ -90,11 +97,11 @@ let tls_connect scheme domain_name cfg stack ipaddr port =
 let ctx =
   Mimic.empty
   |> Mimic.(
-       fold Paf.tcp_edn
+       fold P.tcp_edn
          Fun.[ req scheme; req stack; req ipaddr; dft port 80 ]
          ~k:tcp_connect)
   |> Mimic.(
-       fold Paf.tls_edn
+       fold P.tls_edn
          Fun.
            [
              req scheme;
@@ -112,10 +119,7 @@ let run uri =
   let f _ body =
     Lwt.wakeup_later wk body ;
     Lwt.return () in
-  let ( th_err,
-        (wk_err :
-          [ `Body of string | `Done | Httpaf.Client_connection.error ] Lwt.u) )
-      =
+  let th_err, (wk_err : [ `Body of string | `Done | Alpn.client_error ] Lwt.u) =
     Lwt.wait () in
   let ctx =
     match Uri.scheme uri with
@@ -145,13 +149,17 @@ let run uri =
   let response_handler = response_handler th_err ~f in
   v >>= fun v ->
   let ctx = Mimic.add stack v ctx in
-  Paf.request
-    ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
-    ~ctx ~error_handler:(error_handler wk_err) ~response_handler request
-  >>? fun body ->
-  Httpaf.Body.close_writer body ;
-  Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
-  | `Body body -> Lwt.return_ok body
-  | _ ->
+  P.run ~ctx ~error_handler:(error_handler wk_err) ~response_handler
+    (`V1 request)
+  >>? function
+  | Alpn.Body (Alpn.HTTP_1_0, _) ->
+      Lwt.return_error (`Msg "Invalid protocol (HTTP/1.0)")
+  | Alpn.Body (Alpn.HTTP_2_0, _) ->
+      Lwt.return_error (`Msg "Invalid protocol (H2)")
+  | Alpn.Body (Alpn.HTTP_1_1, body) -> (
       Httpaf.Body.close_writer body ;
-      Lwt.return_error (`Msg "Got an error while sending request")
+      Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
+      | `Body body -> Lwt.return_ok body
+      | _ ->
+          Httpaf.Body.close_writer body ;
+          Lwt.return_error (`Msg "Got an error while sending request"))
