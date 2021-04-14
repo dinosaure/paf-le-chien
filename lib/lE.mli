@@ -13,7 +13,10 @@ module Make (Time : Mirage_time.S) : sig
     ?production:bool ->
     configuration ->
     Mimic.ctx ->
-    (Tls.Config.own_cert, [> `Msg of string ]) result Lwt.t
+    ( [> `Single of X509.Certificate.t list * Mirage_crypto_pk.Rsa.priv ],
+      [> `Msg of string ] )
+    result
+    Lwt.t
 
   val with_uri : Uri.t -> Mimic.ctx -> Mimic.ctx
 end
