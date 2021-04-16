@@ -63,7 +63,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
   type dst = Ipaddr.t * int
 
   module TCP = struct
-    let src = Logs.Src.create "paf-tls"
+    let src = Logs.Src.create "paf-tcp"
 
     module Log = (val Logs.src_log src : Logs.LOG)
 

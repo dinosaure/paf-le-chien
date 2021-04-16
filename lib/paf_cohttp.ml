@@ -4,15 +4,15 @@ let src = Logs.Src.create "paf-cohttp"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let scheme = Mimic.make ~name:"scheme"
+let scheme = Mimic.make ~name:"paf-scheme"
 
-let port = Mimic.make ~name:"port"
+let port = Mimic.make ~name:"paf-port"
 
-let domain_name = Mimic.make ~name:"domain-name"
+let domain_name = Mimic.make ~name:"paf-domain-name"
 
-let ipaddr = Mimic.make ~name:"ipaddr"
+let ipaddr = Mimic.make ~name:"paf-ipaddr"
 
-let sleep = Mimic.make ~name:"sleep"
+let sleep = Mimic.make ~name:"paf-sleep"
 
 type ctx = Mimic.ctx
 
