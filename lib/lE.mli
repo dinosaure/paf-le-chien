@@ -13,7 +13,8 @@ module Make (Time : Mirage_time.S) : sig
     ?production:bool ->
     configuration ->
     Mimic.ctx ->
-    ( [> `Single of X509.Certificate.t list * Mirage_crypto_pk.Rsa.priv ],
+    ( [> `Single of
+         X509.Certificate.t list * [ `RSA of Mirage_crypto_pk.Rsa.priv ] ],
       [> `Msg of string ] )
     result
     Lwt.t

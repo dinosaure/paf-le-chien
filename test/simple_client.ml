@@ -18,7 +18,6 @@ let ( <.> ) f g x = f (g x)
 
 let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
     [ `read ] Alpn.resp_handler -> unit = function
-  | Alpn.Resp_handler (Alpn.HTTP_1_0, _, _) -> failf "Invalid protocol HTTP/1.0"
   | Alpn.Resp_handler (Alpn.HTTP_2_0, _, _) -> failf "Invalid protocol H2"
   | Alpn.Resp_handler (Alpn.HTTP_1_1, response, body) -> (
       let buf = Buffer.create 0x100 in
@@ -152,8 +151,6 @@ let run uri =
   P.run ~ctx ~error_handler:(error_handler wk_err) ~response_handler
     (`V1 request)
   >>? function
-  | Alpn.Body (Alpn.HTTP_1_0, _) ->
-      Lwt.return_error (`Msg "Invalid protocol (HTTP/1.0)")
   | Alpn.Body (Alpn.HTTP_2_0, _) ->
       Lwt.return_error (`Msg "Invalid protocol (H2)")
   | Alpn.Body (Alpn.HTTP_1_1, body) -> (
