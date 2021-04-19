@@ -42,7 +42,7 @@ let minipaf =
               ; package "paf"
               ; package "paf" ~sublibs:[ "le"; "mirage" ]
               ; package "rock" ]
-    (console @-> random @-> time @-> mclock @-> pclock @-> stackv4 @-> stackv4v6 @-> job)
+    (console @-> random @-> time @-> mclock @-> pclock @-> stackv4v6 @-> job)
 
 let random = default_random
 let console = default_console
@@ -50,6 +50,5 @@ let time = default_time
 let pclock = default_posix_clock
 let mclock = default_monotonic_clock
 let stackv4v6 = generic_stackv4v6 default_network
-let stackv4 = generic_stackv4 default_network
 
-let () = register "minipaf" [ minipaf $ console $ random $ time $ mclock $ pclock $ stackv4 $ stackv4v6 ]
+let () = register "minipaf" [ minipaf $ console $ random $ time $ mclock $ pclock $ stackv4v6 ]

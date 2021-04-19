@@ -2,7 +2,7 @@ module type DNS = sig
   type t
 
   module Transport : Dns_client.S
-    with type io_addr = Ipaddr.V4.t * int
+    with type io_addr = Ipaddr.t * int
      and type +'a io = 'a Lwt.t
 
   val nameserver : t -> Transport.ns_addr
