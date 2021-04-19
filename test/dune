@@ -29,10 +29,23 @@
  (libraries uri unix))
 
 (executable
+ (name test_alpn)
+ (modules test_alpn)
+ (libraries mirage-time-unix fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
+   paf.alpn paf.mirage mirage-crypto-rng.unix))
+
+(executable
  (name test_cohttp)
  (modules test_cohttp)
  (libraries mirage-time-unix fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
    cohttp-lwt paf.cohttp paf.mirage mirage-crypto-rng.unix))
+
+(rule
+ (alias runtest)
+ (deps server.pem server.key %{exe:test_alpn.exe})
+ (enabled_if %{arch_sixtyfour})
+ (action
+  (run ./test_alpn.exe --color=always)))
 
 (rule
  (alias runtest)

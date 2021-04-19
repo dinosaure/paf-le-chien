@@ -83,7 +83,7 @@ module Make (Time : Mirage_time.S) = struct
     let priv, csr = csr cfg.certificate_seed cfg.hostname in
     let solver = Letsencrypt.Client.http_solver solver in
     Acme.sign_certificate ~ctx solver le sleep csr >|= fun certs ->
-    `Single (certs, priv)
+    `Single (certs, `RSA priv)
 
   include Paf_cohttp
 end

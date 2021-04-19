@@ -1,12 +1,4 @@
 type ('reqd, 'hdr, 'req, 'resp, 'c, 'a) protocol =
-  | HTTP_1_0
-      : ( Httpaf.Reqd.t,
-          Httpaf.Headers.t,
-          Httpaf.Request.t,
-          Httpaf.Response.t,
-          'c,
-          'c Httpaf.Body.t )
-        protocol
   | HTTP_1_1
       : ( Httpaf.Reqd.t,
           Httpaf.Headers.t,
@@ -37,9 +29,6 @@ type 'c resp_handler =
 
 type 'c reqd_handler =
   | Reqd_handler : ('r, _, _, _, 'c, 'v) protocol * 'r -> 'c reqd_handler
-
-let response_handler_v1_0 edn f resp body =
-  f edn (Resp_handler (HTTP_1_0, resp, body))
 
 let response_handler_v1_1 edn f resp body =
   f edn (Resp_handler (HTTP_1_1, resp, body))
@@ -142,15 +131,6 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
       Lwt.async (fun () ->
           Paf.run (module H2.Client_connection) ~sleep conn flow) ;
       Lwt.return_ok (Body (HTTP_2_0, body))
-  | Some "http/1.0", `V1 request ->
-      let error_handler = error_handler_v1 edn error_handler in
-      let response_handler = response_handler_v1_0 edn response_handler in
-      let body, conn =
-        Httpaf.Client_connection.request request ~error_handler
-          ~response_handler in
-      Lwt.async (fun () ->
-          Paf.run (module Httpaf_Client_connection) ~sleep conn flow) ;
-      Lwt.return_ok (Body (HTTP_1_0, body))
   | (Some "http/1.1" | None), `V1 request ->
       let error_handler = error_handler_v1 edn error_handler in
       let response_handler = response_handler_v1_1 edn response_handler in

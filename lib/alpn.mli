@@ -12,14 +12,6 @@
     handle HTTP/1.0, HTTP/1.1 and H2 protocols. *)
 
 type ('reqd, 'hdr, 'req, 'resp, 'c, 'a) protocol =
-  | HTTP_1_0
-      : ( Httpaf.Reqd.t,
-          Httpaf.Headers.t,
-          Httpaf.Request.t,
-          Httpaf.Response.t,
-          'c,
-          'c Httpaf.Body.t )
-        protocol
   | HTTP_1_1
       : ( Httpaf.Reqd.t,
           Httpaf.Headers.t,
