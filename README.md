@@ -124,7 +124,6 @@ Paf provides the logic behind ALPN according a _certain_ TLS/SSL
 implementation. In other words, Paf is able to correctly dispatch which
 protocol the client wants without a requirement of [ocaml-tls][ocaml-tls] or
 [lwt_ssl][lwt_ssl]. The module [Alpn] a HTTP service which handles:
-- HTTP/1.0
 - HTTP/1.1
 - H2
 
