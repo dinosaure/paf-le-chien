@@ -22,16 +22,15 @@ module Make (Time : Mirage_time.S) = struct
           Some Mirage_crypto_rng.(create ~seed (module Fortuna)) in
     Mirage_crypto_pk.Rsa.generate ?g ~bits:4096 ()
 
-  let csr seed hostname =
+  let csr hostname key =
     let hostname = Domain_name.to_string hostname in
     let cn =
       X509.
         [
           Distinguished_name.(
             Relative_distinguished_name.singleton (CN hostname));
-        ]
-    and key = gen_rsa ?seed () in
-    (key, X509.Signing_request.create cn (`RSA key))
+        ] in
+    X509.Signing_request.create cn (`RSA key)
 
   let prefix = (".well-known", "acme-challenge")
 
@@ -80,7 +79,8 @@ module Make (Time : Mirage_time.S) = struct
       (gen_rsa ?seed:cfg.seed ())
     >>= fun le ->
     let sleep sec = Time.sleep_ns (Duration.of_sec sec) in
-    let priv, csr = csr cfg.certificate_seed cfg.hostname in
+    let priv = gen_rsa ?seed:cfg.certificate_seed () in
+    Lwt.return (csr cfg.hostname priv) >>= fun csr ->
     let solver = Letsencrypt.Client.http_solver solver in
     Acme.sign_certificate ~ctx solver le sleep csr >|= fun certs ->
     `Single (certs, `RSA priv)
