@@ -13,7 +13,6 @@ depends: [
   "dune" {>= "2.0.0"}
   "mirage-stack"
   "mirage-time"
-  "httpaf"
   "tls-mirage" {>= "0.13.0"}
   "mimic"
   "cohttp-lwt"
