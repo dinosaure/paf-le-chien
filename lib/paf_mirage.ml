@@ -183,7 +183,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
 
   let close ({ stack; condition; _ } as t) =
     t.closed <- true ;
-    Stack.disconnect stack >>= fun () ->
+    (* Stack.disconnect stack >>= fun () -> *)
     Lwt_condition.signal condition () ;
     Lwt.return_unit
 
