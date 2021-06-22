@@ -181,7 +181,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
           Lwt_mutex.unlock mutex ;
           accept t)
 
-  let close ({ stack; condition; _ } as t) =
+  let close ({ condition; _ } as t) =
     t.closed <- true ;
     (* Stack.disconnect stack >>= fun () -> *)
     Lwt_condition.signal condition () ;

@@ -249,20 +249,24 @@ end = struct
   let rec really_recv flow ~read ~read_eof =
     Log.debug (fun m -> m "start to really [`read].") ;
     Mimic.read flow.flow >>= function
-    | Error err ->
-        Log.err (fun m -> m "[`read] got an error: %a." Mimic.pp_error err) ;
-        flow.rd_closed <- true ;
-        safely_close flow >>= fun () -> Lwt.return `Closed
-    | Ok `Eof ->
-        let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
-        Log.debug (fun m -> m "[`read] Connection closed.") ;
-        flow.rd_closed <- true ;
-        safely_close flow >>= fun () -> Lwt.return `Closed
     | Ok (`Data v) ->
         let len = Cstruct.len v in
         Log.debug (fun m -> m "<- %d byte(s)" len) ;
         Ke.Rke.N.push flow.queue ~blit ~length:Cstruct.len ~off:0 ~len v ;
         recv flow ~read ~read_eof
+    | Ok `Eof | Error _ -> (
+        Ke.Rke.compress flow.queue ;
+        match Ke.Rke.N.peek flow.queue with
+        | [] ->
+            let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
+            Log.debug (fun m -> m "[`read] Connection closed.") ;
+            flow.rd_closed <- true ;
+            safely_close flow >>= fun () -> Lwt.return `Closed
+        | [ slice ] ->
+            let _ = read_eof slice ~off:0 ~len:(Bigstringaf.length slice) in
+            flow.rd_closed <- true ;
+            safely_close flow >>= fun () -> Lwt.return `Closed
+        | _ -> assert false)
 
   and recv flow ~read ~read_eof =
     match Ke.Rke.N.peek flow.queue with
@@ -279,9 +283,7 @@ end = struct
         Log.debug (fun m -> m "[`read] shift %d/%d byte(s)" shift len) ;
         Ke.Rke.N.shift_exn flow.queue shift ;
         if shift = 0
-        then (
-          Ke.Rke.compress flow.queue ;
-          really_recv flow ~read ~read_eof)
+        then really_recv flow ~read ~read_eof
         else Lwt.return `Continue
 
   let drain flow ~read:_ ~read_eof =
@@ -330,17 +332,11 @@ end = struct
     let rec rd_loop () =
       let rec go () =
         match Runtime.next_read_operation connection with
-        | `Read -> (
+        | `Read ->
             Log.debug (fun m -> m "[`read] start to read.") ;
             let read = Runtime.read connection in
             let read_eof = Runtime.read_eof connection in
-            recv flow ~read ~read_eof >>= function
-            | `Closed ->
-                Log.err (fun m -> m "[`read] connection was closed by peer.") ;
-                Lwt.wakeup_later notify_read_loop_exited () ;
-                flow.rd_closed <- true ;
-                safely_close flow
-            | _ -> go ())
+            recv flow ~read ~read_eof >>= fun _ -> go ()
         | `Yield ->
             Log.debug (fun m -> m "next read operation: `yield") ;
             Runtime.yield_reader connection rd_loop ;
