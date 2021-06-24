@@ -411,8 +411,6 @@ let service connection accept close = Service { accept; connection; close }
 open Rresult
 open Lwt.Infix
 
-let ( >>? ) = Lwt_result.bind
-
 let serve_when_ready :
     type t flow.
     (t, flow, _) posix ->
@@ -430,16 +428,17 @@ let serve_when_ready :
            Lwt.return_unit) ;
        t in
      let rec loop () =
-       let accept = accept t >>? fun flow -> Lwt.return_ok (`Flow flow) in
-       accept >>? function
-       | `Flow flow ->
+       accept t >>= function
+       | Ok flow ->
            Lwt.async (fun () -> handler flow) ;
-           Lwt.pause () >>= loop in
+           Lwt.pause () >>= loop
+       | Error `Closed -> Lwt.return_error `Closed
+       | Error _ -> Lwt.pause () >>= loop in
      let stop_result =
        Lwt.pick [ switched_off; loop () ] >>= function
        | Ok `Stopped -> close t >>= fun () -> Lwt.return_ok ()
        | Error _ as err -> close t >>= fun () -> Lwt.return err in
-     stop_result >>= function Ok () | Error (`Closed | _) -> Lwt.return_unit)
+     stop_result >>= function Ok () | Error `Closed -> Lwt.return_unit)
 
 let server : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
  fun (module Runtime) ~sleep conn flow ->

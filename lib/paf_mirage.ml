@@ -206,11 +206,14 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
       accept t >>= function
       | Error _ as err -> Lwt.return err
       | Ok flow -> (
-          let dst = Stack.TCP.dst flow in
+          let ((ipaddr, port) as dst) = Stack.TCP.dst flow in
           TLS.server_of_flow tls flow >>= function
           | Ok flow -> Lwt.return_ok (dst, flow)
-          | Error _ as err -> Stack.TCP.close flow >>= fun () -> Lwt.return err)
-    in
+          | Error err ->
+              Log.err (fun m ->
+                  m "Got an error when we try to connect (TCP) to %a:%d: %a"
+                    Ipaddr.pp ipaddr port TLS.pp_write_error err) ;
+              Stack.TCP.close flow >>= fun () -> Lwt.return_error err) in
     let connection (dst, flow) =
       let error_handler = error_handler dst in
       let request_handler = request_handler dst in
