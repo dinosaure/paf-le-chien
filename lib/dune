@@ -27,7 +27,8 @@
  (wrapped false)
  (public_name paf.le)
  (modules lE)
- (libraries mirage-time paf.cohttp duration tls emile letsencrypt))
+ (libraries mirage-time mirage-stack paf.cohttp duration tls-mirage emile
+   letsencrypt))
 
 ; (library
 ;  (name mirage_paf)
