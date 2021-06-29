@@ -150,20 +150,18 @@ end = struct
     else writev flow iovecs
 
   let close flow =
-    if ((not flow.rd_closed) && flow.wr_closed)
-       || (flow.rd_closed && not flow.wr_closed)
-    then (
-      flow.rd_closed <- true ;
-      flow.wr_closed <- true ;
-      Log.debug (fun m -> m "Properly close the connection.") ;
-      Mimic.close flow.flow)
-    else Lwt.return ()
+    match (flow.rd_closed, flow.wr_closed) with
+    | true, true -> Lwt.return_unit
+    | _ ->
+        flow.rd_closed <- true ;
+        flow.wr_closed <- true ;
+        Mimic.close flow.flow
 
   let server ~sleep connection flow =
     let queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
     let flow = { flow; sleep; queue; rd_closed = false; wr_closed = false } in
-    let rd_exit, notify_rd_exit = Lwt.task () in
-    let wr_exit, notify_wr_exit = Lwt.task () in
+    let rd_exit, notify_rd_exit = Lwt.wait () in
+    let wr_exit, notify_wr_exit = Lwt.wait () in
     let rec rd_fiber () =
       let rec go () =
         match Runtime.next_read_operation connection with
@@ -175,7 +173,7 @@ end = struct
         | `Yield ->
             Log.debug (fun m -> m "next read operation: `yield") ;
             Runtime.yield_reader connection rd_fiber ;
-            Lwt.return ()
+            Lwt.return_unit
         | `Close ->
             Log.debug (fun m -> m "next read operation: `close") ;
             Lwt.wakeup_later notify_rd_exit () ;
@@ -184,7 +182,7 @@ end = struct
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
           Runtime.report_exn connection exn ;
-          Lwt.return ()) in
+          Lwt.return_unit) in
     let rec wr_fiber () =
       let rec go () =
         match Runtime.next_write_operation connection with
@@ -196,7 +194,7 @@ end = struct
         | `Yield ->
             Log.debug (fun m -> m "next write operation: `yield") ;
             Runtime.yield_writer connection wr_fiber ;
-            Lwt.return ()
+            Lwt.return_unit
         | `Close _ ->
             Log.debug (fun m -> m "next write operation: `close") ;
             Lwt.wakeup_later notify_wr_exit () ;
@@ -204,13 +202,12 @@ end = struct
             safely_close flow in
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
-          Runtime.report_write_result connection `Closed ;
+          (* Runtime.report_write_result connection `Closed ; *)
           Runtime.report_exn connection exn ;
-          Lwt.return ()) in
+          Lwt.return_unit) in
     rd_fiber () ;
     wr_fiber () ;
-    let threads = [ rd_exit; wr_exit ] in
-    Lwt.join threads >>= fun () ->
+    Lwt.join [ rd_exit; wr_exit ] >>= fun () ->
     Log.debug (fun m -> m "End of transmission.") ;
     close flow
 end
@@ -236,9 +233,6 @@ end = struct
     mutable wr_closed : bool;
   }
 
-  let sleep (flow : client) timeout =
-    flow.sleep timeout >>= fun () -> Lwt.return (Error `Closed)
-
   let safely_close flow =
     if flow.rd_closed && flow.wr_closed
     then (
@@ -246,61 +240,67 @@ end = struct
       Mimic.close flow.flow)
     else Lwt.return ()
 
-  let rec really_recv flow ~read ~read_eof =
-    Log.debug (fun m -> m "start to really [`read].") ;
+  let recv flow ~read ~read_eof =
     Mimic.read flow.flow >>= function
+    | Error _ | Ok `Eof ->
+        flow.rd_closed <- true ;
+        safely_close flow >>= fun () ->
+        let _shift =
+          match
+            Ke.Rke.compress flow.queue ;
+            Ke.Rke.N.peek flow.queue
+          with
+          | [] -> read_eof Bigstringaf.empty ~off:0 ~len:0
+          | [ slice ] -> read_eof slice ~off:0 ~len:(Bigstringaf.length slice)
+          | _ -> assert false
+          (* XXX(dinosaure): impossible due to [compress]. *) in
+        Lwt.return `Closed
     | Ok (`Data v) ->
         let len = Cstruct.len v in
-        Log.debug (fun m -> m "<- %d byte(s)" len) ;
         Ke.Rke.N.push flow.queue ~blit ~length:Cstruct.len ~off:0 ~len v ;
-        recv flow ~read ~read_eof
-    | Ok `Eof | Error _ -> (
-        Ke.Rke.compress flow.queue ;
-        match Ke.Rke.N.peek flow.queue with
-        | [] ->
-            let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
-            Log.debug (fun m -> m "[`read] Connection closed.") ;
-            flow.rd_closed <- true ;
-            safely_close flow >>= fun () -> Lwt.return `Closed
-        | [ slice ] ->
-            let _ = read_eof slice ~off:0 ~len:(Bigstringaf.length slice) in
-            flow.rd_closed <- true ;
-            safely_close flow >>= fun () -> Lwt.return `Closed
-        | _ -> assert false)
+        let[@warning "-8"] (slice :: _) = Ke.Rke.N.peek flow.queue in
+        let shift = read slice ~off:0 ~len:(Bigstringaf.length slice) in
+        Ke.Rke.N.shift_exn flow.queue shift ;
+        Lwt.return `Continue
 
-  and recv flow ~read ~read_eof =
+  (*
+  let rec recv flow ~read ~read_eof =
     match Ke.Rke.N.peek flow.queue with
-    | [] ->
+    | [] -> (
         if flow.rd_closed
         then
           let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
           Lwt.return `Closed
-        else really_recv flow ~read ~read_eof
+        else
+          Mimic.read flow.flow >>= function
+          | Error (#Mimic.error as err) ->
+              flow.rd_closed <- true ;
+              safely_close flow >>= fun () -> raise (Flow err)
+          | Ok `Eof ->
+              let _ (* 0 *) = read_eof Bigstringaf.empty ~off:0 ~len:0 in
+              Log.debug (fun m -> m "[`read] Connection closed.") ;
+              flow.rd_closed <- true ;
+              safely_close flow >>= fun () -> Lwt.return `Closed
+          | Ok (`Data v) ->
+              let len = Cstruct.len v in
+              Log.debug (fun m -> m "<- %d byte(s)" len) ;
+              let _ =
+                Ke.Rke.N.push flow.queue ~blit ~length:Cstruct.len ~off:0 ~len v
+              in
+              recv flow ~read ~read_eof)
     | src :: _ ->
         let len = Bigstringaf.length src in
-        Log.debug (fun m -> m "transmit %d byte(s)" len) ;
         let shift = read src ~off:0 ~len in
         Log.debug (fun m -> m "[`read] shift %d/%d byte(s)" shift len) ;
         Ke.Rke.N.shift_exn flow.queue shift ;
-        if shift = 0
-        then really_recv flow ~read ~read_eof
-        else Lwt.return `Continue
+        if shift = 0 then Ke.Rke.compress flow.queue ;
+        Lwt.return `Continue
+  *)
 
-  let drain flow ~read:_ ~read_eof =
-    let go () =
-      match Ke.Rke.N.peek flow.queue with
-      | [] ->
-          Log.debug (fun m -> m "[`drain] empty queue.") ;
-          let _ = read_eof Bigstringaf.empty ~off:0 ~len:0 in
-          Lwt.return ()
-      | src :: _ ->
-          Log.debug (fun m -> m "[`drain] %d byte(s)." (Bigstringaf.length src)) ;
-          let _ = read_eof src ~off:0 ~len:(Bigstringaf.length src) in
-          Lwt.return () in
-    Ke.Rke.compress flow.queue ;
-    go ()
+  let sleep (flow : client) timeout =
+    flow.sleep timeout >>= fun () -> Lwt.return (Error `Closed)
 
-  let writev ?(timeout = 1_000_000_000L) flow iovecs =
+  let writev ?(timeout = 5_000_000_000L) flow iovecs =
     let rec go acc = function
       | [] -> Lwt.return (`Ok acc)
       | { Faraday.buffer; off; len } :: rest -> (
@@ -314,58 +314,52 @@ end = struct
           | Error _ -> assert false) in
     go 0 iovecs
 
+  let send flow iovecs =
+    if flow.wr_closed
+    then safely_close flow >>= fun () -> Lwt.return `Closed
+    else writev flow iovecs
+
   let close flow =
-    if ((not flow.rd_closed) && flow.wr_closed)
-       || (flow.rd_closed && not flow.wr_closed)
-    then (
-      flow.rd_closed <- true ;
-      flow.wr_closed <- true ;
-      Log.debug (fun m -> m "Properly close the connection.") ;
-      Mimic.close flow.flow)
-    else Lwt.return ()
+    match (flow.rd_closed, flow.wr_closed) with
+    | true, true -> Lwt.return_unit
+    | _ ->
+        flow.rd_closed <- true ;
+        flow.wr_closed <- true ;
+        Mimic.close flow.flow
 
   let run ~sleep connection flow =
     let queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
     let flow = { flow; sleep; queue; rd_closed = false; wr_closed = false } in
-    let read_loop_exited, notify_read_loop_exited = Lwt.wait () in
+    let rd_exit, notify_rd_exit = Lwt.wait () in
+    let wr_exit, notify_wr_exit = Lwt.wait () in
 
     let rec rd_loop () =
       let rec go () =
         match Runtime.next_read_operation connection with
         | `Read ->
             Log.debug (fun m -> m "[`read] start to read.") ;
-            let read = Runtime.read connection in
-            let read_eof = Runtime.read_eof connection in
-            recv flow ~read ~read_eof >>= fun _ -> go ()
+            recv flow ~read:(Runtime.read connection)
+              ~read_eof:(Runtime.read_eof connection)
+            >>= fun _ -> go ()
         | `Yield ->
             Log.debug (fun m -> m "next read operation: `yield") ;
             Runtime.yield_reader connection rd_loop ;
-            Lwt.return ()
+            Lwt.return_unit
         | `Close ->
             Log.debug (fun m -> m "[`read] close the connection.") ;
-            let read = Runtime.read connection in
-            let read_eof = Runtime.read_eof connection in
-            drain flow ~read ~read_eof >>= fun () ->
-            Lwt.wakeup_later notify_read_loop_exited () ;
+            Lwt.wakeup_later notify_rd_exit () ;
             flow.rd_closed <- true ;
             safely_close flow in
-      Lwt.async (fun () ->
-          Lwt.catch go (fun exn ->
-              Log.err (fun m ->
-                  m "report a read error: %s" (Printexc.to_string exn)) ;
-              Lwt.wakeup_later notify_read_loop_exited () ;
-              Runtime.report_exn connection exn ;
-              Runtime.shutdown connection ;
-              Lwt.return ())) in
-    let writev = writev flow in
-    let write_loop_exited, notify_write_loop_exited = Lwt.wait () in
-
+      Lwt.async @@ fun () ->
+      Lwt.catch go (fun exn ->
+          Runtime.report_exn connection exn ;
+          Lwt.return_unit) in
     let rec wr_loop () =
       let rec go () =
         match Runtime.next_write_operation connection with
         | `Write iovecs ->
             Log.debug (fun m -> m "[`write] start to write.") ;
-            writev iovecs >>= fun res ->
+            send flow iovecs >>= fun res ->
             Runtime.report_write_result connection res ;
             go ()
         | `Yield ->
@@ -374,20 +368,16 @@ end = struct
             Lwt.return ()
         | `Close _ ->
             Log.debug (fun m -> m "[`write] close.") ;
-            Lwt.wakeup_later notify_write_loop_exited () ;
-            Lwt.return () in
+            Lwt.wakeup_later notify_wr_exit () ;
+            Lwt.return_unit in
 
-      Lwt.async (fun () ->
-          Lwt.catch go (fun exn ->
-              Log.err (fun m ->
-                  m "report a write error: %s" (Printexc.to_string exn)) ;
-              Runtime.report_exn connection exn ;
-              Lwt.return ())) in
+      Lwt.async @@ fun () ->
+      Lwt.catch go (fun exn ->
+          Runtime.report_exn connection exn ;
+          Lwt.return ()) in
     wr_loop () ;
     rd_loop () ;
-    Lwt.join [ read_loop_exited; write_loop_exited ] >>= fun () ->
-    Log.debug (fun m -> m "End of transmission.") ;
-    close flow
+    Lwt.join [ rd_exit; wr_exit ] >>= fun () -> close flow
 end
 
 type impl = Runtime : 'conn runtime * 'conn -> impl
