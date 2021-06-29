@@ -60,8 +60,6 @@ module type RUNTIME = sig
   val shutdown : t -> unit
 end
 
-exception Flow of Mimic.error
-
 type 'conn runtime = (module RUNTIME with type t = 'conn)
 
 type impl = Runtime : 'conn runtime * 'conn -> impl

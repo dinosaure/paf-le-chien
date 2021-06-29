@@ -118,19 +118,8 @@ let request_handler large (ip, port) reqd =
       http_large large (ip, port) (Reqd.request_body reqd) oc
   | _ -> assert false
 
-let error_handler (ip, port) ?request:_ error respond =
-  let open Httpaf in
+let error_handler _ ?request:_ error _respond =
   match error with
-  | `Exn (Paf.Flow err) ->
-      let contents =
-        Fmt.strf "Internal server error from <%a:%d>: %a" Ipaddr.pp ip port
-          Mimic.pp_error err in
-      let headers =
-        Headers.of_list
-          [ ("content-length", string_of_int (String.length contents)) ] in
-      let body = respond headers in
-      Body.write_string body contents ;
-      Body.close_writer body
   | `Exn _exn -> Printexc.print_backtrace stderr
   | `Bad_gateway -> Fmt.epr "Got a bad gateway error.\n%!"
   | `Bad_request -> Fmt.epr "Got a bad request error.\n%!"

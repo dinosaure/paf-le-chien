@@ -60,8 +60,6 @@ let failf fmt = Format.kasprintf (fun err -> raise (Failure err)) fmt
 let error_handler wk _ (err : Alpn.client_error) =
   Lwt.wakeup_later wk (err :> [ `Body of string | `Done | Alpn.client_error ]) ;
   match err with
-  | `Exn (Paf.Flow err) ->
-      failf "Impossible to start a transmission: %a" Mimic.pp_error err
   | `Invalid_response_body_length_v1 _ | `Invalid_response_body_length_v2 _ ->
       failf "Invalid response body-length"
   | `Malformed_response _ -> failf "Malformed response"
