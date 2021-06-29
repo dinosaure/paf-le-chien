@@ -24,6 +24,10 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let () = Sys.set_signal sigpipe Sys.Signal_ignore
 
+let src = Logs.Src.create "simple-server"
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
 module Ke = Ke.Rke
 
@@ -154,6 +158,7 @@ let server_http large stack =
   let http = P.http_service ~error_handler (request_handler large) in
   let (`Initialized th) = P.serve http service in
   unlock fd_8080 ;
+  Log.debug (fun m -> m "HTTP server initialized.") ;
   th
 
 let load_file filename =

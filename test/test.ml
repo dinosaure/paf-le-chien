@@ -41,11 +41,11 @@ let launch_server () =
         "server.key";
         "file.txt";
       |]
-      [||] null null null in
+      [||] null Unix.stdout null in
   let pid1 =
     Unix.create_process_env "./simple_server.exe"
       [| "./simple_server.exe"; "file.txt" |]
-      [||] null null null in
+      [||] null Unix.stdout null in
   at_exit (fun () ->
       try
         Unix.close lock0 ;

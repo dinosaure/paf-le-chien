@@ -1,3 +1,18 @@
+let reporter ppf =
+  let report src level ~over k msgf =
+    let k _ =
+      over () ;
+      k () in
+    let with_metadata header _tags k ppf fmt =
+      Format.kfprintf k ppf
+        ("[%a]%a[%a]: " ^^ fmt ^^ "\n%!")
+        Fmt.(styled `Blue int)
+        (Unix.getpid ()) Logs_fmt.pp_header (level, header)
+        Fmt.(styled `Magenta string)
+        (Logs.Src.name src) in
+    msgf @@ fun ?header ?tags fmt -> with_metadata header tags k ppf fmt in
+  { Logs.report }
+
 (*
 let () = Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true ()
 let () = Logs.set_reporter (reporter Fmt.stderr)
@@ -7,6 +22,10 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 let failf fmt = Format.kasprintf failwith fmt
 
 let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
+
+let src = Logs.Src.create "simple-client"
+
+module Log = (val Logs.src_log src : Logs.LOG)
 
 module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
 open Lwt.Infix
@@ -77,8 +96,8 @@ let tls = Mimic.make ~name:"tls"
 
 let tcp_connect scheme stack ipaddr port =
   match scheme with
-  | `HTTPS -> Lwt.return_some (stack, ipaddr, port)
-  | `HTTP -> Lwt.return_none
+  | `HTTP -> Lwt.return_some (stack, ipaddr, port)
+  | `HTTPS -> Lwt.return_none
 
 let dns_resolve domain_name =
   match Unix.gethostbyname (Domain_name.to_string domain_name) with
@@ -117,7 +136,7 @@ let run uri =
   let th, wk = Lwt.wait () in
   let f _ body =
     Lwt.wakeup_later wk body ;
-    Lwt.return () in
+    Lwt.return_unit in
   let th_err, (wk_err : [ `Body of string | `Done | Alpn.client_error ] Lwt.u) =
     Lwt.wait () in
   let ctx =
@@ -150,10 +169,13 @@ let run uri =
   let ctx = Mimic.add stack v ctx in
   P.run ~ctx ~error_handler:(error_handler wk_err) ~response_handler
     (`V1 request)
-  >>? function
-  | Alpn.Body (Alpn.HTTP_2_0, _) ->
+  >>= function
+  | Error err ->
+      Log.err (fun m -> m "Got an error: %a." Mimic.pp_error err) ;
+      Lwt.return_error err
+  | Ok (Alpn.Body (Alpn.HTTP_2_0, _)) ->
       Lwt.return_error (`Msg "Invalid protocol (H2)")
-  | Alpn.Body (Alpn.HTTP_1_1, body) -> (
+  | Ok (Alpn.Body (Alpn.HTTP_1_1, body)) -> (
       Httpaf.Body.close_writer body ;
       Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
       | `Body body -> Lwt.return_ok body

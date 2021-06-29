@@ -1,4 +1,4 @@
-let src = Logs.Src.create "paf"
+let src = Logs.Src.create "fiber"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
