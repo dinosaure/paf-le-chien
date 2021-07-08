@@ -1,6 +1,7 @@
 open Lwt.Infix
 
 let ( <.> ) f g = fun x -> f (g x)
+let ( >>? ) = Lwt_result.bind
 
 let app =
   let open Rock in
@@ -16,53 +17,29 @@ module Make
   (Mclock : Mirage_clock.MCLOCK)
   (Pclock : Mirage_clock.PCLOCK)
   (Stack : Mirage_stack.V4V6) = struct
-  module Resolver = Dns_client_mirage.Make(Random)(Time)(Mclock)(Stack)
+  module DNS = Dns_client_mirage.Make(Random)(Time)(Mclock)(Stack)
   module Paf = Paf_mirage.Make(Time)(Stack)
-  module Letsencrypt = LE.Make(Time)
   module Nss = Ca_certs_nss.Make(Pclock)
+  module Letsencrypt = LE.Make(Time)(Stack)
 
-  let root =
-    let authenticator = Rresult.R.failwith_error_msg (Nss.authenticator ()) in
-    Tls.Config.client ~authenticator ()
-
-  let tcp_connect scheme stack ipaddr port = match scheme with
-    | `HTTP -> Lwt.return_some (stack, ipaddr, port)
-    | _ -> Lwt.return_none
-
-  let tls_connect scheme domain_name cfg stack ipaddr port = match scheme with
-    | `HTTPS -> Lwt.return_some (domain_name, cfg, stack, ipaddr, port)
-    | _ -> Lwt.return_none
-
-  let dns_resolver dns domain_name =
-    Resolver.gethostbyname dns domain_name >>= function
-    | Ok ipv4 -> Lwt.return_some (Ipaddr.V4 ipv4)
-    | _ -> Lwt.return_none
+  let authenticator = Rresult.R.failwith_error_msg (Nss.authenticator ())
 
   let error_handler _ ?request:_ _ _ = ()
 
   let get_certificate ?(production= false) cfg stackv4v6 =
-    let dns   = Mimic.make ~name:"dns" in
-    let stack = Mimic.make ~name:"stack" in
-    let tls   = Mimic.make ~name:"tls" in
-
-    let ctx =
-      let open Paf_cohttp in
-      Mimic.empty
-      |> Mimic.(fold Paf.tcp_edn Fun.[ req scheme; req stack; req ipaddr; dft port 80; ] ~k:tcp_connect)
-      |> Mimic.(fold Paf.tls_edn Fun.[ req scheme; opt domain_name; dft tls root; req stack; req ipaddr; dft port 443; ]
-                ~k:tls_connect)
-      |> Mimic.(fold ipaddr Fun.[ req dns; req domain_name; ] ~k:dns_resolver)
-      |> Mimic.add dns (Resolver.create stackv4v6)
-      |> Mimic.add stack stackv4v6 in
     Paf.init ~port:80 stackv4v6 >>= fun t ->
     let service = Paf.http_service ~error_handler Letsencrypt.request_handler in
     Lwt_switch.with_switch @@ fun stop ->
     let `Initialized th = Paf.serve ~stop service t in
+    let ctx = Letsencrypt.ctx
+      ~gethostbyname:(fun dns domain_name -> DNS.gethostbyname dns domain_name >>? fun ipv4 -> Lwt.return_ok (Ipaddr.V4 ipv4))
+      ~authenticator
+      (DNS.create stackv4v6) stackv4v6 in
     let fiber =
-      Letsencrypt.provision_certificate ~production cfg ctx >>= fun res ->
-      Lwt_switch.turn_off stop >>= fun () -> Lwt.return res in
+      Letsencrypt.provision_certificate ~production cfg ctx >>= fun certificates ->
+      Lwt_switch.turn_off stop >>= fun () -> Lwt.return certificates in
     Lwt.both th fiber >>= function
-    | (_, Ok res) -> Lwt.return res 
+    | (_, Ok certificates) -> Lwt.return certificates
     | (_, Error (`Msg err)) -> failwith err
 
   type kind =

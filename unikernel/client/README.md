@@ -42,7 +42,7 @@ unikernel. It contains multiple processes to _resolve_ a connection:
 - and we put the `dns` that the `with_resolv` should use
 
 All of these parameters are dynamic! Feel free to change them:
-- you can restrict the `Tls.Config.clien` if you want
+- you can restrict the `Tls.Config.client` if you want
 - you can force the DNS client to use a special nameserver
 - you can remove the DNS resolver...
 - etc.
