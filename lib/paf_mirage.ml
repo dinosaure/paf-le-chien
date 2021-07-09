@@ -131,7 +131,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
             flow
   end
 
-  let src = Logs.Src.create "paf-layer"
+  let src = Logs.Src.create "paf-mirage"
 
   module Log = (val Logs.src_log src : Logs.LOG)
 

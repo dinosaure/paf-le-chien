@@ -240,7 +240,7 @@ module Client (Flow : Mirage_flow.S) (Runtime : RUNTIME) : sig
 end = struct
   open Lwt.Infix
 
-  let src = Logs.Src.create "paf"
+  let src = Logs.Src.create "paf-client"
 
   module Log = (val Logs.src_log src : Logs.LOG)
 
@@ -319,6 +319,10 @@ let service connection accept close = Service { accept; connection; close }
 open Rresult
 open Lwt.Infix
 
+let src = Logs.Src.create "paf"
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 let serve_when_ready :
     type t flow.
     (t, flow, _) posix ->
@@ -340,11 +344,20 @@ let serve_when_ready :
        | Ok flow ->
            Lwt.async (fun () -> handler flow) ;
            Lwt.pause () >>= loop
-       | Error `Closed -> Lwt.return_error `Closed
-       | Error _ -> Lwt.pause () >>= loop in
+       | Error `Closed ->
+           Log.err (fun m -> m "The bounded socket was closed.") ;
+           Lwt.return_error `Closed
+       | Error _ ->
+           Log.warn (fun m ->
+               m
+                 "Got an error from the client socket. Continue to run the \
+                  loop.") ;
+           Lwt.pause () >>= loop in
      let stop_result =
        Lwt.pick [ switched_off; loop () ] >>= function
-       | Ok `Stopped -> close t >>= fun () -> Lwt.return_ok ()
+       | Ok `Stopped ->
+           Log.debug (fun m -> m "Got the signal to stop the service.") ;
+           close t >>= fun () -> Lwt.return_ok ()
        | Error _ as err -> close t >>= fun () -> Lwt.return err in
      stop_result >>= function Ok () | Error `Closed -> Lwt.return_unit)
 
