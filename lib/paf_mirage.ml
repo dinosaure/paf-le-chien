@@ -1,7 +1,11 @@
 module type S = sig
   type stack
 
-  module TCP : Mirage_flow.S
+  module TCP : sig
+    include Mirage_flow.S
+
+    val dst : flow -> Ipaddr.t * int
+  end
 
   module TLS : module type of Tls_mirage.Make (TCP)
 
