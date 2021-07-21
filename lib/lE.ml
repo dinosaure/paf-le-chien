@@ -167,8 +167,9 @@ module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) =
     | Ok flow -> (
         let error_handler = error_handler mvar_err in
         let response_handler = response_handler mvar_res pusher in
-        let httpaf_body, conn =
-          Httpaf.Client_connection.request ~error_handler
+        let conn = Httpaf.Client_connection.create ?config:None in
+        let httpaf_body =
+          Httpaf.Client_connection.request conn ~error_handler
             ~response_handler req in
         Lwt.async (fun () ->
             Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
