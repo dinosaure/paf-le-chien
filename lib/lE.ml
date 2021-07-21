@@ -1,6 +1,6 @@
 (* (c) Hannes Menhert *)
 
-let ( <.> ) f g = fun x -> f (g x)
+let ( <.> ) f g x = f (g x)
 
 type configuration = {
   email : Emile.mailbox option;
@@ -10,9 +10,13 @@ type configuration = {
 }
 
 let scheme = Mimic.make ~name:"paf-le-scheme"
+
 let port = Mimic.make ~name:"paf-le-port"
+
 let domain_name = Mimic.make ~name:"paf-le-domain-name"
+
 let ipaddr = Mimic.make ~name:"paf-le-ipaddr"
+
 let sleep = Mimic.make ~name:"paf-le-sleep"
 
 module Httpaf_Client_connection = struct
@@ -65,7 +69,8 @@ let with_host headers uri =
     | None -> hostname in
   Httpaf.Headers.add_unless_exists headers "host" hostname
 
-let with_transfer_encoding ~chunked (meth : [ `GET | `HEAD | `POST ]) body headers =
+let with_transfer_encoding ~chunked (meth : [ `GET | `HEAD | `POST ]) body
+    headers =
   match (meth, chunked, body, Httpaf.Headers.get headers "content-length") with
   | `GET, _, _, _ -> headers
   | _, (None | Some false), _, Some _ -> headers
@@ -84,21 +89,31 @@ let with_transfer_encoding ~chunked (meth : [ `GET | `HEAD | `POST ]) body heade
   | _, Some false, `Stream _, None ->
       invalid_arg "Impossible to transfer a stream with a content-length value"
 
-module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) = struct
+module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) =
+struct
   type ctx = Mimic.ctx
 
   module Headers = struct
     include Httpaf.Headers
-    let init_with field value = of_list [ field, value ]
+
+    let init_with field value = of_list [ (field, value) ]
+
     let get_location hdrs = Option.map Uri.of_string (get hdrs "location")
   end
 
   module Body = struct
-    type t = [ `Stream of string Lwt_stream.t | `Empty | `String of string | `Strings of string list ]
+    type t =
+      [ `Stream of string Lwt_stream.t
+      | `Empty
+      | `String of string
+      | `Strings of string list ]
 
     let of_string str = `String str
+
     let to_string = function
-      | `Stream t -> let open Lwt.Infix in Lwt_stream.to_list t >|= String.concat ""
+      | `Stream t ->
+          let open Lwt.Infix in
+          Lwt_stream.to_list t >|= String.concat ""
       | `String str -> Lwt.return str
       | `Empty -> Lwt.return ""
       | `Strings sstr -> Lwt.return (String.concat "" sstr)
@@ -108,11 +123,12 @@ module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) =
     include Httpaf.Response
 
     let status resp = Httpaf.Status.to_code resp.Httpaf.Response.status
+
     let headers resp = resp.Httpaf.Response.headers
   end
 
   let error_handler mvar err = Lwt.async @@ fun () -> Lwt_mvar.put mvar err
-  
+
   let response_handler mvar pusher resp body =
     let on_eof () = pusher None in
     let rec on_read buf ~off ~len =
@@ -131,7 +147,7 @@ module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) =
     | None ->
         Httpaf.Body.close_writer body ;
         Lwt.return_unit
-  
+
   let transmit cohttp_body httpaf_body =
     match cohttp_body with
     | `Empty -> Httpaf.Body.close_writer httpaf_body
@@ -144,10 +160,11 @@ module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) =
     | `Stream stream -> Lwt.async @@ fun () -> unroll httpaf_body stream
 
   exception Invalid_response_body_length of Httpaf.Response.t
+
   exception Malformed_response of string
 
-  let call ?(ctx = Mimic.empty) ?(headers= Httpaf.Headers.empty)
-      ?(body= `Empty) ?chunked (meth : [ `GET | `HEAD | `POST ]) uri =
+  let call ?(ctx = Mimic.empty) ?(headers = Httpaf.Headers.empty)
+      ?(body = `Empty) ?chunked (meth : [ `GET | `HEAD | `POST ]) uri =
     let ctx = with_uri uri ctx in
     let sleep =
       match Mimic.get sleep ctx with
@@ -156,7 +173,10 @@ module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) =
       (* TODO *) in
     let headers = with_host headers uri in
     let headers = with_transfer_encoding ~chunked meth body headers in
-    let req = Httpaf.Request.create ~headers (meth :> Httpaf.Method.t) (Uri.path_and_query uri) in
+    let req =
+      Httpaf.Request.create ~headers
+        (meth :> Httpaf.Method.t)
+        (Uri.path_and_query uri) in
     let stream, pusher = Lwt_stream.create () in
     let mvar_res = Lwt_mvar.create_empty () in
     let mvar_err = Lwt_mvar.create_empty () in
@@ -168,8 +188,8 @@ module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) =
         let error_handler = error_handler mvar_err in
         let response_handler = response_handler mvar_res pusher in
         let httpaf_body, conn =
-          Httpaf.Client_connection.request ~error_handler
-            ~response_handler req in
+          Httpaf.Client_connection.request ~error_handler ~response_handler req
+        in
         Lwt.async (fun () ->
             Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
         transmit body httpaf_body ;
@@ -190,8 +210,11 @@ module HTTP : Letsencrypt__HTTP_client.S with type ctx = Mimic.ctx (* FIXME *) =
   open Lwt.Infix
 
   let head ?ctx ?headers uri = call ?ctx ?headers `HEAD uri >|= fst
+
   let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
-  let post ?ctx ?body ?chunked ?headers uri = call ?ctx ?body ?chunked ?headers `POST uri
+
+  let post ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `POST uri
 end
 
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
