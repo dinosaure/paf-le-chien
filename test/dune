@@ -42,6 +42,7 @@
 
 (rule
  (alias runtest)
+ (package paf)
  (deps server.pem server.key %{exe:test_alpn.exe})
  (enabled_if %{arch_sixtyfour})
  (action
@@ -49,6 +50,7 @@
 
 (rule
  (alias runtest)
+ (package paf)
  (locks m)
  (deps server.pem server.key file.txt %{exe:clients.exe}
    %{exe:simple_server.exe})
