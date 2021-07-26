@@ -1,3 +1,5 @@
+[@@@warning "-45"]
+
 module type DNS = sig
   type t
 
@@ -26,7 +28,7 @@ module Make
   (Console : Mirage_console.S)
   (Time : Mirage_time.S)
   (Pclock : Mirage_clock.PCLOCK)
-  (Stack : Mirage_stack.V4V6)
+  (_ : Mirage_stack.V4V6)
   (Dns : DNS) (* XXX(dinosaure): ask @hannesm to provide a signature. *)
   (Paf : Paf_mirage.S) = struct
   module Client = Paf_cohttp
@@ -44,23 +46,24 @@ module Make
     let k scheme stack ipaddr port = match scheme with
       | `HTTP -> Lwt.return_some (stack, ipaddr, port) | _ -> Lwt.return_none in
     Mimic.(fold Paf.tcp_edn Fun.[ req Client.scheme
-                                   ; req stack
-                                   ; req Client.ipaddr
-                                   ; dft Client.port 80 ] ~k ctx)
+                                ; req stack
+                                ; req Client.ipaddr
+                                ; dft Client.port 80 ] ~k ctx)
 
   let with_tls ctx =
     let k scheme domain_name cfg stack ipaddr port = match scheme with
       | `HTTPS -> Lwt.return_some (domain_name, cfg, stack, ipaddr, port) | _ -> Lwt.return_none in
     Mimic.(fold Paf.tls_edn Fun.[ req Client.scheme
-                                   ; opt Client.domain_name
-                                   ; dft tls default_tls_cfg
-                                   ; req stack
-                                   ; req Client.ipaddr
-                                   ; dft Client.port 443 ] ~k ctx)
+                                ; opt Client.domain_name
+                                ; dft tls default_tls_cfg
+                                ; req stack
+                                ; req Client.ipaddr
+                                ; dft Client.port 443 ] ~k ctx)
 
   let dns = Mimic.make ~name:"dns"
 
   let with_dns v ctx = Mimic.add dns v ctx
+  let with_sleep ctx = Mimic.add Paf_cohttp.sleep Time.sleep_ns ctx
 
   let with_resolv ctx =
     let k dns domain_name =
@@ -75,6 +78,7 @@ module Make
     let uri = Uri.of_string (Key_gen.uri ()) in
     let ctx =
       Mimic.empty
+      |> with_sleep
       |> with_tcp         (* stack -> ipaddr -> port => (stack * ipaddr * port) *)
       |> with_tls         (* domain_name -> tls -> stack -> ipaddr -> port => (domain_name * tls * stack * ipaddr * port) *)
       |> with_resolv      (* domain_name => ipaddr *)
