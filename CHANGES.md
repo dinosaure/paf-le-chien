@@ -1,3 +1,16 @@
+### 0.0.4 (2021-26-07) Paris - France
+
+- Don't use `disconnect` when the server terminates (@dinosaure, #28)
+- The main loop should not leave when it get an error from a client (@dinosaure, #28)
+- `Closed` error from TLS layer does not mean that the service is close,
+  wrap such error into a client's `write_error` (@dinosaure, #28)
+- Do the compression of the ring-buffer at any call of `read` (@dinosaure, #29)
+- Refactore the loop under a common implementation (@dinosaure, #30)
+- Add a simple accessor to the peer identity (@dinosaure, #31)
+- Cut package between `paf` & `paf-cohttp` (@dinosaure, @hannesm, #32)
+- Cut package between `paf` & `paf-le` (@dinosaure, @hannesm, #33)
+- Update unikernels with the package layout (@dinosaure, #34)
+
 ### 0.0.3 (2021-26-04) Paris - France
 
 - Update to X509.0.13.0 (@hannesm, #26)
