@@ -1,4 +1,4 @@
-## Paf le chien - A MirageOS compatible layer for [HTTP/AF][httpaf]
+## Paf le chien - A MirageOS compatible layer for [HTTP/AF][httpaf] and [H2][h2]
 
 This library wants to provide an easy way to use HTTP/AF & H2 into a unikernel.
 It implements the global /loop/ with a protocol implementation.
@@ -34,7 +34,7 @@ let stack () =
     Ipaddr.V4.Prefix.global None >>= fun tcp ->
   connect udp tcp
 
-let () = Lwt_main.run (stack >>= start)
+let () = Lwt_main.run (stack () >>= start)
 ```
 
 It provides a client-side with the logic of Mimic and let the user to implement
@@ -58,7 +58,7 @@ user wants. It can be:
 - [mirage-tcpip][mirage-tcpip]
 - The host TCP/IP stack (see the `Unix` module)
 
-All of these choices **is not** done by Paf but must be define by the user.
+All of these choices **is not** done by Paf but must be defined by the user.
 Then, the CoHTTP layer trusts on [mirage-tcpip][mirage-tcpip] and
 [ocaml-tls][ocaml-tls] to easily communicate with a peer from a given `Uri.t`.
 Even if it seems to be the easy way to do HTTP requests (over TLS or not), the
@@ -120,10 +120,10 @@ let get_tls_certificate () =
 
 ### Application Layer Protocol Negotiation
 
-Paf provides the logic behind ALPN according a _certain_ TLS/SSL
+Paf provides the logic behind ALPN negotiation according a _certain_ TLS/SSL
 implementation. In other words, Paf is able to correctly dispatch which
 protocol the client wants without a requirement of [ocaml-tls][ocaml-tls] or
-[lwt_ssl][lwt_ssl]. The module [Alpn] a HTTP service which handles:
+[lwt_ssl][lwt_ssl]. The module [Alpn] is a HTTP service which handles:
 - HTTP/1.1
 - H2
 
