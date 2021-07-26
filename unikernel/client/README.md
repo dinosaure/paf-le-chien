@@ -7,11 +7,9 @@ when we want to start an HTTP(S) server.
 
 ### The config.ml
 
-The MirageOS manifest describes 3 things:
+The MirageOS manifest describes 2 things:
 
-- How to make a simple `Paf` module (which provides `request`)
-- How to make a simple `Paf_cohttp` module (which provides `Cohttp_lwt.S.Client`
-  plus _metadata_)
+- How to make a simple `Paf` module (which provides HTTP and HTTPS connections)
 - How to make a simple DNS client (with `ocaml-dns`)
 
 It requires an `uri` argument such as:

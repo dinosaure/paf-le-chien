@@ -37,7 +37,7 @@ let uri =
 let minipaf =
   foreign "Unikernel.Make"
     ~keys:[ Key.abstract uri ]
-    ~packages:[ package "paf" ~sublibs:[ "cohttp" ]
+    ~packages:[ package "paf-cohttp"
               ; package "ca-certs-nss" ]
     (console @-> time @-> pclock @-> stackv4v6 @-> dns @-> paf @-> job)
 
