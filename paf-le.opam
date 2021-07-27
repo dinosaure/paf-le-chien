@@ -11,9 +11,9 @@ bug-reports: "https://github.com/dinosaure/paf-le-chien/issues"
 depends: [
   "ocaml" {>= "4.08.0"}
   "dune" {>= "2.0.0"}
-  "paf"
+  "paf" {= version}
   "duration"
-  "emile"
+  "emile" {>= "1.1"}
   "httpaf"
   "letsencrypt" {>= "0.3.0"}
   "mirage-stack"
