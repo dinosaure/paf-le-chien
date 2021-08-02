@@ -339,8 +339,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
       * Ipaddr.t
       * int
 
-    let connect (stack, cfg, domain_name, ipaddr, port) =
-      let host = Option.map Domain_name.to_string domain_name in
+    let connect (stack, cfg, host, ipaddr, port) =
       Stack.TCP.create_connection stack (ipaddr, port) >>= function
       | Error err -> Lwt.return_error (`Read err)
       | Ok flow -> client_of_flow ?host cfg flow
