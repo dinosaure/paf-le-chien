@@ -115,7 +115,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
       * Ipaddr.t
       * int
 
-    let connect (domain_name, cfg, stack, ipaddr, port) =
+    let connect (host, cfg, stack, ipaddr, port) =
       let t = Stack.tcp stack in
       Log.debug (fun m ->
           m "Initiate a TCP connection for TLS to: %a:%d." Ipaddr.pp ipaddr port) ;
@@ -130,9 +130,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
       | Ok flow ->
           Log.debug (fun m ->
               m "Initiate a TLS connection to: %a:%d." Ipaddr.pp ipaddr port) ;
-          client_of_flow cfg
-            ?host:(Option.map Domain_name.to_string domain_name)
-            flow
+          client_of_flow cfg ?host flow
   end
 
   let src = Logs.Src.create "paf-layer"
