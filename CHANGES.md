@@ -1,3 +1,7 @@
+### 0.0.5 (2021-03-08) Paris - France
+
+- Use `tls.0.14.0` (@hannesm, @dinosaure, #38)
+
 ### 0.0.4 (2021-26-07) Paris - France
 
 - Don't use `disconnect` when the server terminates (@dinosaure, #28)
