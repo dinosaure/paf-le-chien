@@ -11,7 +11,7 @@ let app =
   App.create ~handler ()
 
 module Make
-  (Console : Mirage_console.S)
+  (_ : Mirage_console.S)
   (Random : Mirage_random.S)
   (Time : Mirage_time.S)
   (Mclock : Mirage_clock.MCLOCK)
@@ -70,7 +70,7 @@ module Make
         HTTPS (Option.value ~default:443 port, { Letsencrypt.hostname; email; seed; certificate_seed; })
       | None -> failwith "Missing hostname"
 
-  let start console _random _time _mclock _pclock stackv4v6 =
+  let start _console _random _time _mclock _pclock stackv4v6 =
     let email = Option.bind (Key_gen.email ()) (Rresult.R.to_option <.> Emile.of_string) in
     let hostname = Option.bind (Key_gen.hostname ()) (Rresult.R.(to_option <.> host)) in
     let cfg = cfg ?port:(Key_gen.port ())
