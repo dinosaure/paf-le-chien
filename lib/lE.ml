@@ -295,7 +295,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
     | Ok csr ->
         Acme.initialise ~ctx ~endpoint
           ?email:(Option.map Emile.to_string cfg.email)
-          (gen_rsa ?seed:cfg.seed ())
+          (`RSA (gen_rsa ?seed:cfg.seed ()))
         >>? fun le ->
         let sleep sec = Time.sleep_ns (Duration.of_sec sec) in
         let solver = Letsencrypt.Client.http_solver solver in
