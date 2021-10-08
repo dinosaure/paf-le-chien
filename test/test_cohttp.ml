@@ -87,7 +87,7 @@ let tls_connect scheme domain_name cfg stack ipaddr port =
   | _ -> Lwt.return_none
 
 let null =
-  let authenticator ~host:_ _ = Ok None in
+  let authenticator ?ip:_ ~host:_ _ = Ok None in
   Tls.Config.client ~authenticator ()
 
 module Client = Paf_cohttp
