@@ -4,9 +4,13 @@ let ( <.> ) f g x = f (g x)
 
 type configuration = {
   email : Emile.mailbox option;
-  seed : string option;
   certificate_seed : string option;
+  certificate_key_type : X509.Key_type.t;
+  certificate_key_bits : int option;
   hostname : [ `host ] Domain_name.t;
+  account_seed : string option;
+  account_key_type : X509.Key_type.t;
+  account_key_bits : int option;
 }
 
 let scheme = Mimic.make ~name:"paf-le-scheme"
@@ -220,9 +224,13 @@ end
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
   type nonrec configuration = configuration = {
     email : Emile.mailbox option;
-    seed : string option;
     certificate_seed : string option;
+    certificate_key_type : X509.Key_type.t;
+    certificate_key_bits : int option;
     hostname : [ `host ] Domain_name.t;
+    account_seed : string option;
+    account_key_type : X509.Key_type.t;
+    account_key_bits : int option;
   }
 
   module Acme = Letsencrypt.Client.Make (HTTP)
@@ -230,14 +238,9 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
   module Log = (val let src = Logs.Src.create "letsencrypt" in
                     Logs.src_log src : Logs.LOG)
 
-  let gen_rsa ?seed () =
-    let g =
-      match seed with
-      | None -> None
-      | Some seed ->
-          let seed = Cstruct.of_string seed in
-          Some Mirage_crypto_rng.(create ~seed (module Fortuna)) in
-    Mirage_crypto_pk.Rsa.generate ?g ~bits:4096 ()
+  let gen_key ?seed ?bits key_type =
+    let seed = Option.map Cstruct.of_string seed in
+    X509.Private_key.generate ?seed ?bits key_type
 
   let csr key host =
     let host = Domain_name.to_string host in
@@ -289,13 +292,23 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
       if production
       then Letsencrypt.letsencrypt_production_url
       else Letsencrypt.letsencrypt_staging_url in
-    let priv = `RSA (gen_rsa ?seed:cfg.seed ()) in
+    let priv =
+      gen_key
+        ?seed:cfg.certificate_seed
+        ?bits:cfg.certificate_key_bits
+        cfg.certificate_key_type in
     match csr priv cfg.hostname with
     | Error _ as err -> Lwt.return err
     | Ok csr ->
+        let account_key =
+          gen_key
+            ?seed:cfg.account_seed
+            ?bits:cfg.account_key_bits
+            cfg.account_key_type
+        in
         Acme.initialise ~ctx ~endpoint
           ?email:(Option.map Emile.to_string cfg.email)
-          (gen_rsa ?seed:cfg.seed ())
+          account_key
         >>? fun le ->
         let sleep sec = Time.sleep_ns (Duration.of_sec sec) in
         let solver = Letsencrypt.Client.http_solver solver in
