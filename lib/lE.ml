@@ -294,19 +294,14 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
       then Letsencrypt.letsencrypt_production_url
       else Letsencrypt.letsencrypt_staging_url in
     let priv =
-      gen_key
-        ?seed:cfg.certificate_seed
-        ?bits:cfg.certificate_key_bits
+      gen_key ?seed:cfg.certificate_seed ?bits:cfg.certificate_key_bits
         cfg.certificate_key_type in
     match csr priv cfg.hostname with
     | Error _ as err -> Lwt.return err
     | Ok csr ->
         let account_key =
-          gen_key
-            ?seed:cfg.account_seed
-            ?bits:cfg.account_key_bits
-            cfg.account_key_type
-        in
+          gen_key ?seed:cfg.account_seed ?bits:cfg.account_key_bits
+            cfg.account_key_type in
         Acme.initialise ~ctx ~endpoint
           ?email:(Option.map Emile.to_string cfg.email)
           account_key
