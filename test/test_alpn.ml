@@ -126,7 +126,7 @@ let ctx_with_tls stack ~port tls =
   let ipaddr = Ipaddr_unix.of_inet_addr Unix.inet_addr_loopback in
   Mimic.add P.tls_edn (None, tls, stack, ipaddr, port) Mimic.empty
 
-let authenticator ~host:_ _ = Ok None
+let authenticator ?ip:_ ~host:_ _ = Ok None
 
 type version = Version : _ Alpn.protocol -> version
 
