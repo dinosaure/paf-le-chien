@@ -86,8 +86,8 @@ val service :
   ('t -> unit Lwt.t) ->
   't Paf.service
 (** [service info ~error_handler ~request_handler accept close] creates a new
-    {!Paf.service} over the {i socket} ['t]. From the given implementation of
-    [accept] and [close], we are able to instantiate the {i main loop}. Then,
+    {!type:Paf.service} over the {i socket} ['t]. From the given implementation
+    of [accept] and [close], we are able to instantiate the {i main loop}. Then,
     from the given [info], we extract informations such the application layer
     protocol and choose which protocol we will use. Currently, if [info.alpn]
     returns:
@@ -95,7 +95,7 @@ val service :
     - [Some "http/1.0" | Some "http/1.1" | None], we launch an [http/af] service
     - [Some "h2"], we launch an [h2] service
 
-    The user is able to identify which protocol we launched by {!resd_handler}.
+    The user is able to identify which protocol we launched by {!resp_handler}.
     The returned service can be run with {!Paf.serve}. Here is an example with
     [Lwt_unix.file_descr] and the TCP/IP transmission protocol (without ALPN
     negotiation):
