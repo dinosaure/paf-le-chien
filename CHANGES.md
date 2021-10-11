@@ -1,3 +1,8 @@
+### 0.0.6 (2021-10-11) Paris - France
+
+- Use `tls.0.15.0`, `x509.0.15.0` and `letsencrypt.0.4.0` (@hannesm, @dinosaure, #42)
+- Fix the documentation (@dinosaure, #43)
+
 ### 0.0.5 (2021-03-08) Paris - France
 
 - Use `tls.0.14.0` (@hannesm, @dinosaure, #38)
