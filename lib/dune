@@ -2,7 +2,7 @@
  (name paf)
  (public_name paf)
  (modules paf)
- (libraries rresult faraday bigstringaf ke mimic))
+ (libraries faraday bigstringaf ke mimic))
 
 (library
  (name alpn)

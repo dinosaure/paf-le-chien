@@ -148,7 +148,7 @@ let run uri =
     | Some host ->
     match
       ( Ipaddr.of_string host,
-        Rresult.(Domain_name.of_string host >>= Domain_name.host) )
+        Result.bind (Domain_name.of_string host) Domain_name.host )
     with
     | Ok v0, Ok v1 ->
         (ctx |> Mimic.add ipaddr v0 |> Mimic.add domain_name v1, Some host)

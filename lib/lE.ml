@@ -48,7 +48,8 @@ let with_uri uri ctx =
     match Uri.host uri with
     | Some v -> (
         match
-          (Rresult.(Domain_name.(of_string v >>= host)), Ipaddr.of_string v)
+          ( Result.bind (Domain_name.of_string v) Domain_name.host,
+            Ipaddr.of_string v )
         with
         | _, Ok v -> (None, Some v)
         | Ok v, _ -> (Some v, None)
@@ -321,10 +322,10 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
       | `Closed -> pp_write_error ppf `Closed
 
     let write stack cs =
-      write stack cs >|= Rresult.R.reword_error (fun err -> `Write_error err)
+      write stack cs >|= Result.map_error (fun err -> `Write_error err)
 
     let writev stack css =
-      writev stack css >|= Rresult.R.reword_error (fun err -> `Write_error err)
+      writev stack css >|= Result.map_error (fun err -> `Write_error err)
 
     type nonrec write_error =
       [ `Error of error | `Write_error of write_error | `Closed ]

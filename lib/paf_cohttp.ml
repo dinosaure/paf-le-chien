@@ -76,7 +76,8 @@ let with_uri uri ctx =
     match Uri.host uri with
     | Some v -> (
         match
-          (Rresult.(Domain_name.(of_string v >>= host)), Ipaddr.of_string v)
+          ( Result.bind (Domain_name.of_string v) Domain_name.host,
+            Ipaddr.of_string v )
         with
         | _, Ok v -> (None, Some v)
         | Ok v, _ -> (Some v, None)
