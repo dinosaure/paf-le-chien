@@ -94,7 +94,7 @@ let service info ~error_handler ~request_handler accept close =
         let conn = H2.Server_connection.create ~error_handler request_handler in
         Lwt.return_ok (flow, Paf.Runtime ((module H2.Server_connection), conn))
     | Some protocol ->
-        Lwt.return_error (Rresult.R.msgf "Invalid protocol %S." protocol) in
+        Lwt.return_error (`Msg (Fmt.str "Invalid protocol %S." protocol)) in
   Paf.service connection accept close
 
 type client_error =
@@ -143,4 +143,4 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
       Lwt.return_ok (Body (HTTP_1_1, body))
   | Some protocol, _ ->
       Lwt.return_error
-        (Rresult.R.msgf "Invalid Application layer protocol: %S" protocol)
+        (`Msg (Fmt.str "Invalid Application layer protocol: %S" protocol))
