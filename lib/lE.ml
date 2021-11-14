@@ -262,9 +262,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
     Log.debug (fun m ->
         m "Let's encrypt request handler for %a:%d" Ipaddr.pp ipaddr port) ;
     let req = Httpaf.Reqd.request reqd in
-    match
-      Astring.String.cuts ~sep:"/" ~empty:false req.Httpaf.Request.target
-    with
+    match String.split_on_char '/' req.Httpaf.Request.target with
     | [ p1; p2; token ]
       when String.equal p1 (fst prefix) && String.equal p2 (snd prefix) -> (
         match Hashtbl.find_opt tokens token with
