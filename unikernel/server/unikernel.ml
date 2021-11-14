@@ -22,7 +22,7 @@ module Make
   module Nss = Ca_certs_nss.Make(Pclock)
   module Letsencrypt = LE.Make(Time)(Stack)
 
-  let authenticator = Rresult.R.failwith_error_msg (Nss.authenticator ())
+  let authenticator = Result.get_ok (Nss.authenticator ())
 
   let error_handler _ ?request:_ _ _ = ()
 
@@ -60,8 +60,8 @@ module Make
         (fun _ -> request_handler) in
       let `Initialized th = Paf.serve service t in th
 
-  let host v = let open Rresult in
-    Domain_name.of_string v >>= Domain_name.host
+  let host v =
+    Result.bind (Domain_name.of_string v) Domain_name.host
 
   let cfg ?port ?email ?hostname ?seed ?certificate_seed = function
     | false -> HTTP (Option.value ~default:80 port)
@@ -71,8 +71,8 @@ module Make
       | None -> failwith "Missing hostname"
 
   let start _console _random _time _mclock _pclock stackv4v6 =
-    let email = Option.bind (Key_gen.email ()) (Rresult.R.to_option <.> Emile.of_string) in
-    let hostname = Option.bind (Key_gen.hostname ()) (Rresult.R.(to_option <.> host)) in
+    let email = Option.bind (Key_gen.email ()) (Result.to_option <.> Emile.of_string) in
+    let hostname = Option.bind (Key_gen.hostname ()) (Result.to_option <.> host) in
     let cfg = cfg ?port:(Key_gen.port ())
                   ?email
                   ?hostname

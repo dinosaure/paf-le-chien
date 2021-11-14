@@ -1,4 +1,3 @@
-open Rresult
 open Lwt.Infix
 
 let ( <.> ) f g x = f (g x)
@@ -95,7 +94,7 @@ let service ~request_handler () =
         let edn = Tcpip_stack_socket.V4V6.TCP.dst flow in
         P.TLS.server_of_flow tls flow >>= function
         | Ok flow -> Lwt.return_ok (edn, flow)
-        | Error err -> Lwt.return_error (R.msgf "%a" P.TLS.pp_write_error err))
+        | Error err -> Lwt.return_error (`Msg (Fmt.str "%a" P.TLS.pp_write_error err)))
   and close = P.close in
   Alpn.service info ~error_handler ~request_handler accept close
 
