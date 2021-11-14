@@ -15,7 +15,6 @@ depends: [
   "mirage-time"
   "tls-mirage" {>= "0.15.0"}
   "mimic"
-  "rresult"
   "ke" {>= "0.4"}
   "lwt" {with-test}
   "base-unix" {with-test}
