@@ -36,9 +36,11 @@ let ( >>? ) x f =
 let ( <.> ) f g x = f (g x)
 
 let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
-    [ `read ] Alpn.resp_handler -> unit = function
-  | Alpn.Resp_handler (Alpn.HTTP_2_0, _, _) -> failf "Invalid protocol H2"
-  | Alpn.Resp_handler (Alpn.HTTP_1_1, response, body) -> (
+    Alpn.response -> Alpn.body -> unit =
+ fun resp body ->
+  match (resp, body) with
+  | Alpn.Response_HTTP_2_0 _, _ -> failf "Invalid protocol H2"
+  | Alpn.Response_HTTP_1_1 response, Alpn.Body_HTTP_1_1 (Alpn.Rd, body) -> (
       let buf = Buffer.create 0x100 in
       let th, wk = Lwt.wait () in
       let on_eof () =
@@ -54,6 +56,7 @@ let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
       | _ ->
           Httpaf.Body.close_reader body ;
           Lwt.return_unit)
+  | _ -> assert false
 
 let failf fmt = Format.kasprintf (fun err -> raise (Failure err)) fmt
 
@@ -171,12 +174,12 @@ let run uri =
   | Error err ->
       Log.err (fun m -> m "Got an error: %a." Mimic.pp_error err) ;
       Lwt.return_error err
-  | Ok (Alpn.Body (Alpn.HTTP_2_0, _)) ->
-      Lwt.return_error (`Msg "Invalid protocol (H2)")
-  | Ok (Alpn.Body (Alpn.HTTP_1_1, body)) -> (
+  | Ok (Alpn.Body_HTTP_2_0 _) -> Lwt.return_error (`Msg "Invalid protocol (H2)")
+  | Ok (Alpn.Body_HTTP_1_1 (Alpn.Wr, body)) -> (
       Httpaf.Body.close_writer body ;
       Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
       | `Body body -> Lwt.return_ok body
       | _ ->
           Httpaf.Body.close_writer body ;
           Lwt.return_error (`Msg "Got an error while sending request"))
+  | _ -> assert false
