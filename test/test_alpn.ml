@@ -145,7 +145,7 @@ let test01 =
   let tls = Tls.Config.client ~authenticator ~alpn_protocols:[ "http/1.1" ] () in
   let req = `V1 (Httpaf.Request.create `GET "/") in
   Lwt.both
-    ( unix_stack () >>= fun stack ->
+    ( unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun stack ->
       P.init ~port stack >>= fun t ->
       P.serve ~stop service t |> fun (`Initialized th) ->
       let ctx = ctx_with_tls stack ~port tls in
@@ -174,7 +174,7 @@ let test02 =
   let tls = Tls.Config.client ~authenticator ~alpn_protocols:[ "h2" ] () in
   let req = `V2 (H2.Request.create ~scheme:"https" `GET "/") in
   Lwt.both
-    ( unix_stack () >>= fun stack ->
+    ( unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun stack ->
       P.init ~port stack >>= fun t ->
       P.serve ~stop service t |> fun (`Initialized th) ->
       let ctx = ctx_with_tls stack ~port tls in
