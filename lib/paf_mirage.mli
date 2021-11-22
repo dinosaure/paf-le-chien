@@ -71,9 +71,9 @@ module type S = sig
   val run :
     ctx:Mimic.ctx ->
     error_handler:(dst option -> Alpn.client_error -> unit) ->
-    response_handler:(dst option -> [ `read ] Alpn.resp_handler -> unit) ->
+    response_handler:(dst option -> Alpn.response -> Alpn.body -> unit) ->
     [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
-    ([ `write ] Alpn.body, [> Mimic.error ]) result Lwt.t
+    (Alpn.body, [> Mimic.error ]) result Lwt.t
 end
 
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :

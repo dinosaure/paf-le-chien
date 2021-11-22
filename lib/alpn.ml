@@ -1,44 +1,32 @@
-type ('reqd, 'hdr, 'req, 'resp, 'c, 'a) protocol =
-  | HTTP_1_1
-      : ( Httpaf.Reqd.t,
-          Httpaf.Headers.t,
-          Httpaf.Request.t,
-          Httpaf.Response.t,
-          'c,
-          'c Httpaf.Body.t )
-        protocol
-  | HTTP_2_0
-      : ( H2.Reqd.t,
-          H2.Headers.t,
-          H2.Request.t,
-          H2.Response.t,
-          'c,
-          'c H2.Body.t )
-        protocol
+type 'c capability = Rd : [ `read ] capability | Wr : [ `write ] capability
 
-type 'c body = Body : (_, _, _, _, 'c, 'v) protocol * 'v -> 'c body
+type body =
+  | Body_HTTP_1_1 : 'c capability * 'c Httpaf.Body.t -> body
+  | Body_HTTP_2_0 : 'c capability * 'c H2.Body.t -> body
 
-type request = Request : (_, _, 'r, _, _, _) protocol * 'r -> request
+type response =
+  | Response_HTTP_1_1 of Httpaf.Response.t
+  | Response_HTTP_2_0 of H2.Response.t
 
-type response = Response : (_, _, _, 'r, _, _) protocol * 'r -> response
+type request =
+  | Request_HTTP_1_1 of Httpaf.Request.t
+  | Request_HTTP_2_0 of H2.Request.t
 
-type headers = Headers : (_, 'hdr, _, _, _, _) protocol * 'hdr -> headers
+type reqd = Reqd_HTTP_1_1 of Httpaf.Reqd.t | Reqd_HTTP_2_0 of H2.Reqd.t
 
-type 'c resp_handler =
-  | Resp_handler : (_, _, _, 'r, 'c, 'v) protocol * 'r * 'v -> 'c resp_handler
+type headers =
+  | Headers_HTTP_1_1 of Httpaf.Headers.t
+  | Headers_HTTP_2_0 of H2.Headers.t
 
-type 'c reqd_handler =
-  | Reqd_handler : ('r, _, _, _, 'c, 'v) protocol * 'r -> 'c reqd_handler
+let response_handler_v1_1 capability edn f resp body =
+  f edn (Response_HTTP_1_1 resp) (Body_HTTP_1_1 (capability, body))
 
-let response_handler_v1_1 edn f resp body =
-  f edn (Resp_handler (HTTP_1_1, resp, body))
+let response_handler_v2_0 capability edn f resp body =
+  f edn (Response_HTTP_2_0 resp) (Body_HTTP_2_0 (capability, body))
 
-let response_handler_v2_0 edn f resp body =
-  f edn (Resp_handler (HTTP_2_0, resp, body))
+let request_handler_v1 edn f reqd = f edn (Reqd_HTTP_1_1 reqd)
 
-let request_handler_v1 edn f reqd = f edn (Reqd_handler (HTTP_1_1, reqd))
-
-let request_handler_v2 edn f reqd = f edn (Reqd_handler (HTTP_2_0, reqd))
+let request_handler_v2 edn f reqd = f edn (Reqd_HTTP_2_0 reqd)
 
 module Httpaf_Client_connection = struct
   include Httpaf.Client_connection
@@ -60,17 +48,17 @@ type server_error =
 
 let error_handler_v1 edn f ?request error
     (response : Httpaf.Headers.t -> [ `write ] Httpaf.Body.t) =
-  let request = Option.map (fun req -> Request (HTTP_1_1, req)) request in
+  let request = Option.map (fun req -> Request_HTTP_1_1 req) request in
   let response = function
-    | Headers (HTTP_1_1, headers) -> Body (HTTP_1_1, response headers)
+    | Headers_HTTP_1_1 headers -> Body_HTTP_1_1 (Wr, response headers)
     | _ -> assert false in
   f edn ?request (error :> server_error) response
 
 let error_handler_v2 edn f ?request error
     (response : H2.Headers.t -> [ `write ] H2.Body.t) =
-  let request = Option.map (fun req -> Request (HTTP_2_0, req)) request in
+  let request = Option.map (fun req -> Request_HTTP_2_0 req) request in
   let response = function
-    | Headers (HTTP_2_0, headers) -> Body (HTTP_2_0, response headers)
+    | Headers_HTTP_2_0 headers -> Body_HTTP_2_0 (Wr, response headers)
     | _ -> assert false in
   f edn ?request (error :> server_error) response
 
@@ -121,7 +109,7 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
   match (alpn, request) with
   | (Some "h2" | None), `V2 request ->
       let error_handler = error_handler_v2 edn error_handler in
-      let response_handler = response_handler_v2_0 edn response_handler in
+      let response_handler = response_handler_v2_0 Rd edn response_handler in
       let conn =
         H2.Client_connection.create ?config:None ?push_handler:None
           ~error_handler in
@@ -130,17 +118,17 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
           ~response_handler in
       Lwt.async (fun () ->
           Paf.run (module H2.Client_connection) ~sleep conn flow) ;
-      Lwt.return_ok (Body (HTTP_2_0, body))
+      Lwt.return_ok (Body_HTTP_2_0 (Wr, body))
   | (Some "http/1.1" | None), `V1 request ->
       let error_handler = error_handler_v1 edn error_handler in
-      let response_handler = response_handler_v1_1 edn response_handler in
+      let response_handler = response_handler_v1_1 Rd edn response_handler in
       let conn = Httpaf.Client_connection.create ?config:None in
       let body =
         Httpaf.Client_connection.request conn request ~error_handler
           ~response_handler in
       Lwt.async (fun () ->
           Paf.run (module Httpaf_Client_connection) ~sleep conn flow) ;
-      Lwt.return_ok (Body (HTTP_1_1, body))
+      Lwt.return_ok (Body_HTTP_1_1 (Wr, body))
   | Some protocol, _ ->
       Lwt.return_error
         (`Msg (Fmt.str "Invalid Application layer protocol: %S" protocol))

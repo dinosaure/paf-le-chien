@@ -128,7 +128,7 @@ let ctx_with_tls stack ~port tls =
 
 let authenticator ?ip:_ ~host:_ _ = Ok None
 
-type version = Version : _ Alpn.protocol -> version
+type version = HTTP_1_1 | HTTP_2_0
 
 let test01 =
   Alcotest_lwt.test_case "http/1.1" `Quick @@ fun _sw () ->
@@ -136,11 +136,14 @@ let test01 =
   let stop = Lwt_switch.create () in
   let th, wk = Lwt.wait () in
   let request, wk_request = Lwt.wait () in
-  let request_handler _edn : [ `write ] Alpn.reqd_handler -> unit = function
-    | Alpn.Reqd_handler (version, _) ->
-        Lwt.wakeup_later wk_request (Version version) ;
+  let request_handler _edn : Alpn.reqd -> unit = function
+    | Alpn.Reqd_HTTP_1_1 _reqd ->
+        Lwt.wakeup_later wk_request HTTP_1_1 ;
+        Lwt.wakeup_later wk ()
+    | Alpn.Reqd_HTTP_2_0 _reqd ->
+        Lwt.wakeup_later wk_request HTTP_2_0 ;
         Lwt.wakeup_later wk () in
-  let response_handler () : [ `read ] Alpn.resp_handler -> unit = fun _ -> () in
+  let response_handler () : Alpn.response -> Alpn.body -> unit = fun _ _ -> () in
   let service = service ~request_handler () in
   let tls = Tls.Config.client ~authenticator ~alpn_protocols:[ "http/1.1" ] () in
   let req = `V1 (Httpaf.Request.create `GET "/") in
@@ -154,7 +157,7 @@ let test01 =
   >>= fun ((body, ()), ()) ->
   request >>= fun request ->
   match (request, body) with
-  | Version Alpn.HTTP_1_1, Alpn.Body (Alpn.HTTP_1_1, _) ->
+  | HTTP_1_1, Alpn.Body_HTTP_1_1 _ ->
       Alcotest.(check pass) "http/1.1" () () ;
       Lwt.return_unit
   | _ -> Alcotest.failf "Unexpected version of HTTP"
@@ -165,11 +168,14 @@ let test02 =
   let stop = Lwt_switch.create () in
   let th, wk = Lwt.wait () in
   let request, wk_request = Lwt.wait () in
-  let request_handler _edn : [ `write ] Alpn.reqd_handler -> unit = function
-    | Alpn.Reqd_handler (version, _) ->
-        Lwt.wakeup_later wk_request (Version version) ;
+  let request_handler _edn : Alpn.reqd -> unit = function
+    | Alpn.Reqd_HTTP_1_1 _ ->
+        Lwt.wakeup_later wk_request HTTP_1_1 ;
+        Lwt.wakeup_later wk ()
+    | Alpn.Reqd_HTTP_2_0 _ ->
+        Lwt.wakeup_later wk_request HTTP_2_0 ;
         Lwt.wakeup_later wk () in
-  let response_handler () : [ `read ] Alpn.resp_handler -> unit = fun _ -> () in
+  let response_handler () : Alpn.response -> Alpn.body -> unit = fun _ _ -> () in
   let service = service ~request_handler () in
   let tls = Tls.Config.client ~authenticator ~alpn_protocols:[ "h2" ] () in
   let req = `V2 (H2.Request.create ~scheme:"https" `GET "/") in
@@ -183,7 +189,7 @@ let test02 =
   >>= fun ((body, ()), ()) ->
   request >>= fun request ->
   match (request, body) with
-  | Version Alpn.HTTP_2_0, Alpn.Body (Alpn.HTTP_2_0, _) ->
+  | HTTP_2_0, Alpn.Body_HTTP_2_0 _ ->
       Alcotest.(check pass) "h2" () () ;
       Lwt.return_unit
   | _ -> Alcotest.failf "Unexpected version of HTTP"
