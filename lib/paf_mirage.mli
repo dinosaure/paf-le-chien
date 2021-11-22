@@ -77,4 +77,4 @@ module type S = sig
 end
 
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
-  S with type stack = Stack.t and type TCP.flow = Stack.TCP.flow
+  S with type stack = Stack.TCP.t and type TCP.flow = Stack.TCP.flow

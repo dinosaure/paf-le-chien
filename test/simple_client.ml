@@ -164,7 +164,7 @@ let run uri =
   let request = Httpaf.Request.create ~headers `GET (Uri.path uri) in
   let response_handler = response_handler th_err ~f in
   v >>= fun v ->
-  let ctx = Mimic.add stack v ctx in
+  let ctx = Mimic.add stack (Tcpip_stack_socket.V4V6.tcp v) ctx in
   P.run ~ctx ~error_handler:(error_handler wk_err) ~response_handler
     (`V1 request)
   >>= function

@@ -181,9 +181,10 @@ let stack =
     Ipaddr.V4.Prefix.global None
   >>= fun tcpv4 -> Tcpip_stack_socket.V4V6.connect udpv4 tcpv4
 
-let run_http large = stack >>= server_http large
+let run_http large = stack >|= Tcpip_stack_socket.V4V6.tcp >>= server_http large
 
-let run_https cert key large = stack >>= server_https cert key large
+let run_https cert key large =
+  stack >|= Tcpip_stack_socket.V4V6.tcp >>= server_https cert key large
 
 let () =
   match Sys.argv with

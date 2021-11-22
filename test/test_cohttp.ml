@@ -57,7 +57,7 @@ let tls =
 let sleep = Lwt_unix.sleep <.> Int64.to_float
 
 let run_http_and_https_server ~request_handler stop =
-  unix_stack () >>= fun stack ->
+  unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun stack ->
   P.init ~port:9090 stack >>= fun socket0 ->
   P.init ~port:3434 stack >>= fun socket1 ->
   let http = P.http_service ~error_handler request_handler in
@@ -201,7 +201,7 @@ let request_handler (ip, port) reqd =
 
 let test01 =
   Alcotest_lwt.test_case "simple-http" `Quick @@ fun _sw () ->
-  unix_stack () >>= fun v ->
+  unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun v ->
   let ctx = Mimic.add stack v ctx in
   Client.get ~ctx (Uri.of_string "http://localhost:9090/")
   >>= fun (_resp, body) ->
@@ -211,7 +211,7 @@ let test01 =
 
 let test02 =
   Alcotest_lwt.test_case "repeat" `Quick @@ fun _sw () ->
-  unix_stack () >>= fun v ->
+  unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun v ->
   let ctx = Mimic.add stack v ctx in
   let body = Cohttp_lwt.Body.of_string "Hello!" in
   Client.post ~ctx ~body (Uri.of_string "http://localhost:9090/repeat")
@@ -222,7 +222,7 @@ let test02 =
 
 let test03 =
   Alcotest_lwt.test_case "simple-https" `Quick @@ fun _sw () ->
-  unix_stack () >>= fun v ->
+  unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun v ->
   let ctx = Mimic.add stack v ctx in
   Client.get ~ctx (Uri.of_string "https://localhost:3434/")
   >>= fun (_resp, body) ->
@@ -232,7 +232,7 @@ let test03 =
 
 let test04 =
   Alcotest_lwt.test_case "repeat (https)" `Quick @@ fun _sw () ->
-  unix_stack () >>= fun v ->
+  unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun v ->
   let ctx = Mimic.add stack v ctx in
   let body = Cohttp_lwt.Body.of_string "Secret Hello!" in
   Client.post ~ctx ~body (Uri.of_string "https://localhost:3434/repeat")
@@ -243,7 +243,7 @@ let test04 =
 
 let test05 =
   Alcotest_lwt.test_case "queries" `Quick @@ fun _sw () ->
-  unix_stack () >>= fun v ->
+  unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun v ->
   let ctx = Mimic.add stack v ctx in
   Client.get ~ctx (Uri.of_string "https://localhost:3434/query?foo=a&bar=b")
   >>= fun (_resp, body) ->
