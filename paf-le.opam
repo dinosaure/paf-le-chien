@@ -24,3 +24,7 @@ depends: [
 build: ["dune" "build" "-p" name "-j" jobs]
 run-test: ["dune" "runtest" "-p" name "-j" jobs]
 dev-repo: "git+https://github.com/dinosaure/paf-le-chien.git"
+
+pin-depends: [
+  [ "httpaf.dev" "git+https://github.com/aantron/httpaf.git#3a74fd8851e3019f5889ae1bf9350e90ed40017d" ]
+]
