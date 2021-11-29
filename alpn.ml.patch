@@ -1,0 +1,52 @@
+diff --git a/lib/alpn.ml b/lib/alpn.ml
+index 804275d..d8cd40b 100644
+--- a/lib/alpn.ml
++++ b/lib/alpn.ml
+@@ -1,9 +1,13 @@
+ type 'c capability = Rd : [ `read ] capability | Wr : [ `write ] capability
+ 
+ type body =
+-  | Body_HTTP_1_1 : 'c capability * 'c Httpaf.Body.t -> body
++  | Body_HTTP_1_1 : 'c capability * 'c httpaf_body -> body
+   | Body_HTTP_2_0 : 'c capability * 'c H2.Body.t -> body
+ 
++and _ httpaf_body =
++  | Body_wr : Httpaf.Body.Writer.t -> [ `write ] httpaf_body
++  | Body_rd : Httpaf.Body.Reader.t -> [ `read ] httpaf_body
++
+ type response =
+   | Response_HTTP_1_1 of Httpaf.Response.t
+   | Response_HTTP_2_0 of H2.Response.t
+@@ -47,10 +51,10 @@ type server_error =
+   [ `Bad_gateway | `Bad_request | `Exn of exn | `Internal_server_error ]
+ 
+ let error_handler_v1 edn f ?request error
+-    (response : Httpaf.Headers.t -> [ `write ] Httpaf.Body.t) =
++    (response : Httpaf.Headers.t -> Httpaf.Body.Writer.t) =
+   let request = Option.map (fun req -> Request_HTTP_1_1 req) request in
+   let response = function
+-    | Headers_HTTP_1_1 headers -> Body_HTTP_1_1 (Wr, response headers)
++    | Headers_HTTP_1_1 headers -> Body_HTTP_1_1 (Wr, Body_wr (response headers))
+     | _ -> assert false in
+   f edn ?request (error :> server_error) response
+ 
+@@ -121,13 +125,15 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
+       Lwt.return_ok (Body_HTTP_2_0 (Wr, body))
+   | (Some "http/1.1" | None), `V1 request ->
+       let error_handler = error_handler_v1 edn error_handler in
+-      let response_handler = response_handler_v1_1 Rd edn response_handler in
+-      let body, conn =
+-        Httpaf.Client_connection.request request ~error_handler
++      let response_handler resp body =
++        response_handler_v1_1 Rd edn response_handler resp (Body_rd body) in
++      let conn = Httpaf.Client_connection.create ?config:None in
++      let body =
++        Httpaf.Client_connection.request conn request ~error_handler
+           ~response_handler in
+       Lwt.async (fun () ->
+           Paf.run (module Httpaf_Client_connection) ~sleep conn flow) ;
+-      Lwt.return_ok (Body_HTTP_1_1 (Wr, body))
++      Lwt.return_ok (Body_HTTP_1_1 (Wr, Body_wr body))
+   | Some protocol, _ ->
+       Lwt.return_error
+         (`Msg (Fmt.str "Invalid Application layer protocol: %S" protocol))
