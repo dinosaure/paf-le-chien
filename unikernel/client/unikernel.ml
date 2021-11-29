@@ -34,7 +34,7 @@ module Make
   module Client = Paf_cohttp
   module Nss = Ca_certs_nss.Make(Pclock)
 
-  let authenticator = Rresult.R.failwith_error_msg (Nss.authenticator ())
+  let authenticator = Result.get_ok (Nss.authenticator ())
   let default_tls_cfg = Tls.Config.client ~authenticator ()
 
   let stack = Mimic.make ~name:"stack"

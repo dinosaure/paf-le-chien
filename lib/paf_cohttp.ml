@@ -27,8 +27,8 @@ let response_handler mvar pusher resp body =
   let rec on_read buf ~off ~len =
     let str = Bigstringaf.substring buf ~off ~len in
     pusher (Some str) ;
-    Httpaf.Body.schedule_read ~on_eof ~on_read body in
-  Httpaf.Body.schedule_read ~on_eof ~on_read body ;
+    Httpaf.Body.Reader.schedule_read ~on_eof ~on_read body in
+  Httpaf.Body.Reader.schedule_read ~on_eof ~on_read body ;
   Lwt.async @@ fun () -> Lwt_mvar.put mvar resp
 
 let rec unroll body stream =
@@ -36,22 +36,22 @@ let rec unroll body stream =
   Lwt_stream.get stream >>= function
   | Some str ->
       Log.debug (fun m -> m "Transmit to HTTP/AF: %S." str) ;
-      Httpaf.Body.write_string body str ;
+      Httpaf.Body.Writer.write_string body str ;
       unroll body stream
   | None ->
       Log.debug (fun m -> m "Close the HTTP/AF writer.") ;
-      Httpaf.Body.close_writer body ;
+      Httpaf.Body.Writer.close body ;
       Lwt.return_unit
 
 let transmit cohttp_body httpaf_body =
   match cohttp_body with
-  | `Empty -> Httpaf.Body.close_writer httpaf_body
+  | `Empty -> Httpaf.Body.Writer.close httpaf_body
   | `String str ->
-      Httpaf.Body.write_string httpaf_body str ;
-      Httpaf.Body.close_writer httpaf_body
+      Httpaf.Body.Writer.write_string httpaf_body str ;
+      Httpaf.Body.Writer.close httpaf_body
   | `Strings sstr ->
-      List.iter (Httpaf.Body.write_string httpaf_body) sstr ;
-      Httpaf.Body.close_writer httpaf_body
+      List.iter (Httpaf.Body.Writer.write_string httpaf_body) sstr ;
+      Httpaf.Body.Writer.close httpaf_body
   | `Stream stream -> Lwt.async @@ fun () -> unroll httpaf_body stream
 
 exception Internal_server_error
@@ -76,7 +76,8 @@ let with_uri uri ctx =
     match Uri.host uri with
     | Some v -> (
         match
-          (Rresult.(Domain_name.(of_string v >>= host)), Ipaddr.of_string v)
+          ( Result.bind (Domain_name.of_string v) Domain_name.host,
+            Ipaddr.of_string v )
         with
         | _, Ok v -> (None, Some v)
         | Ok v, _ -> (Some v, None)
@@ -166,8 +167,8 @@ let call ?(ctx = default_ctx) ?headers
       let response_handler = response_handler mvar_res pusher in
       let conn = Httpaf.Client_connection.create ~config in
       let httpaf_body =
-        Httpaf.Client_connection.request conn ~error_handler
-          ~response_handler req in
+        Httpaf.Client_connection.request conn ~error_handler ~response_handler
+          req in
       Lwt.async (fun () ->
           Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;

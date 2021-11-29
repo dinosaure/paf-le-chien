@@ -55,13 +55,13 @@ module type S = sig
   val run :
     ctx:Mimic.ctx ->
     error_handler:(dst option -> Alpn.client_error -> unit) ->
-    response_handler:(dst option -> [ `read ] Alpn.resp_handler -> unit) ->
+    response_handler:(dst option -> Alpn.response -> Alpn.body -> unit) ->
     [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
-    ([ `write ] Alpn.body, [> Mimic.error ]) result Lwt.t
+    (Alpn.body, [> Mimic.error ]) result Lwt.t
 end
 
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
-  S with type stack = Stack.t and type TCP.flow = Stack.TCP.flow = struct
+  S with type stack = Stack.TCP.t and type TCP.flow = Stack.TCP.flow = struct
   open Lwt.Infix
 
   type dst = Ipaddr.t * int
@@ -73,7 +73,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
 
     include Stack.TCP
 
-    type endpoint = Stack.t * Ipaddr.t * int
+    type endpoint = Stack.TCP.t * Ipaddr.t * int
 
     type nonrec write_error =
       [ `Write of write_error | `Connect of error | `Closed ]
@@ -93,10 +93,9 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
       | Error err -> Lwt.return_error (`Write err)
 
     let connect (stack, ipaddr, port) =
-      let t = Stack.tcp stack in
       Log.debug (fun m ->
           m "Initiate a TCP connection to: %a:%d." Ipaddr.pp ipaddr port) ;
-      create_connection t (ipaddr, port) >>= function
+      create_connection stack (ipaddr, port) >>= function
       | Ok _ as v -> Lwt.return v
       | Error err -> Lwt.return_error (`Connect err)
   end
@@ -111,15 +110,14 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
     type endpoint =
       [ `host ] Domain_name.t option
       * Tls.Config.client
-      * Stack.t
+      * Stack.TCP.t
       * Ipaddr.t
       * int
 
     let connect (host, cfg, stack, ipaddr, port) =
-      let t = Stack.tcp stack in
       Log.debug (fun m ->
           m "Initiate a TCP connection for TLS to: %a:%d." Ipaddr.pp ipaddr port) ;
-      Stack.TCP.create_connection t (ipaddr, port) >>= function
+      Stack.TCP.create_connection stack (ipaddr, port) >>= function
       | Error err ->
           Log.err (fun m ->
               m
@@ -137,7 +135,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
 
   module Log = (val Logs.src_log src : Logs.LOG)
 
-  type stack = Stack.t
+  type stack = Stack.TCP.t
 
   let tcp_edn, tcp_protocol = Mimic.register ~name:"tcp" (module TCP)
 
@@ -145,7 +143,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
     Mimic.register ~priority:10 ~name:"tls" (module TLS)
 
   type t = {
-    stack : Stack.t;
+    stack : Stack.TCP.t;
     queue : Stack.TCP.flow Queue.t;
     condition : unit Lwt_condition.t;
     mutex : Lwt_mutex.t;
@@ -162,7 +160,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
       Lwt_condition.signal condition () ;
       Lwt_mutex.unlock mutex ;
       Lwt.return () in
-    Stack.listen_tcp ~port stack listener ;
+    Stack.TCP.listen ~port stack listener ;
     Lwt.return { stack; queue; condition; mutex; closed = false }
 
   let rec accept ({ queue; condition; mutex; _ } as t) =

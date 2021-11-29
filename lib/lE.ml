@@ -4,9 +4,13 @@ let ( <.> ) f g x = f (g x)
 
 type configuration = {
   email : Emile.mailbox option;
-  seed : string option;
   certificate_seed : string option;
+  certificate_key_type : X509.Key_type.t;
+  certificate_key_bits : int option;
   hostname : [ `host ] Domain_name.t;
+  account_seed : string option;
+  account_key_type : X509.Key_type.t;
+  account_key_bits : int option;
 }
 
 let scheme = Mimic.make ~name:"paf-le-scheme"
@@ -44,7 +48,8 @@ let with_uri uri ctx =
     match Uri.host uri with
     | Some v -> (
         match
-          (Rresult.(Domain_name.(of_string v >>= host)), Ipaddr.of_string v)
+          ( Result.bind (Domain_name.of_string v) Domain_name.host,
+            Ipaddr.of_string v )
         with
         | _, Ok v -> (None, Some v)
         | Ok v, _ -> (Some v, None)
@@ -134,29 +139,29 @@ struct
     let rec on_read buf ~off ~len =
       let str = Bigstringaf.substring buf ~off ~len in
       pusher (Some str) ;
-      Httpaf.Body.schedule_read ~on_eof ~on_read body in
-    Httpaf.Body.schedule_read ~on_eof ~on_read body ;
+      Httpaf.Body.Reader.schedule_read ~on_eof ~on_read body in
+    Httpaf.Body.Reader.schedule_read ~on_eof ~on_read body ;
     Lwt.async @@ fun () -> Lwt_mvar.put mvar resp
 
   let rec unroll body stream =
     let open Lwt.Infix in
     Lwt_stream.get stream >>= function
     | Some str ->
-        Httpaf.Body.write_string body str ;
+        Httpaf.Body.Writer.write_string body str ;
         unroll body stream
     | None ->
-        Httpaf.Body.close_writer body ;
+        Httpaf.Body.Writer.close body ;
         Lwt.return_unit
 
   let transmit cohttp_body httpaf_body =
     match cohttp_body with
-    | `Empty -> Httpaf.Body.close_writer httpaf_body
+    | `Empty -> Httpaf.Body.Writer.close httpaf_body
     | `String str ->
-        Httpaf.Body.write_string httpaf_body str ;
-        Httpaf.Body.close_writer httpaf_body
+        Httpaf.Body.Writer.write_string httpaf_body str ;
+        Httpaf.Body.Writer.close httpaf_body
     | `Strings sstr ->
-        List.iter (Httpaf.Body.write_string httpaf_body) sstr ;
-        Httpaf.Body.close_writer httpaf_body
+        List.iter (Httpaf.Body.Writer.write_string httpaf_body) sstr ;
+        Httpaf.Body.Writer.close httpaf_body
     | `Stream stream -> Lwt.async @@ fun () -> unroll httpaf_body stream
 
   exception Invalid_response_body_length of Httpaf.Response.t
@@ -189,8 +194,8 @@ struct
         let response_handler = response_handler mvar_res pusher in
         let conn = Httpaf.Client_connection.create ?config:None in
         let httpaf_body =
-          Httpaf.Client_connection.request conn ~error_handler
-            ~response_handler req in
+          Httpaf.Client_connection.request conn ~error_handler ~response_handler
+            req in
         Lwt.async (fun () ->
             Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
         transmit body httpaf_body ;
@@ -221,9 +226,13 @@ end
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
   type nonrec configuration = configuration = {
     email : Emile.mailbox option;
-    seed : string option;
     certificate_seed : string option;
+    certificate_key_type : X509.Key_type.t;
+    certificate_key_bits : int option;
     hostname : [ `host ] Domain_name.t;
+    account_seed : string option;
+    account_key_type : X509.Key_type.t;
+    account_key_bits : int option;
   }
 
   module Acme = Letsencrypt.Client.Make (HTTP)
@@ -231,14 +240,9 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
   module Log = (val let src = Logs.Src.create "letsencrypt" in
                     Logs.src_log src : Logs.LOG)
 
-  let gen_rsa ?seed () =
-    let g =
-      match seed with
-      | None -> None
-      | Some seed ->
-          let seed = Cstruct.of_string seed in
-          Some Mirage_crypto_rng.(create ~seed (module Fortuna)) in
-    Mirage_crypto_pk.Rsa.generate ?g ~bits:4096 ()
+  let gen_key ?seed ?bits key_type =
+    let seed = Option.map Cstruct.of_string seed in
+    X509.Private_key.generate ?seed ?bits key_type
 
   let csr key host =
     let host = Domain_name.to_string host in
@@ -260,9 +264,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
     Log.debug (fun m ->
         m "Let's encrypt request handler for %a:%d" Ipaddr.pp ipaddr port) ;
     let req = Httpaf.Reqd.request reqd in
-    match
-      Astring.String.cuts ~sep:"/" ~empty:false req.Httpaf.Request.target
-    with
+    match String.split_on_char '/' req.Httpaf.Request.target with
     | [ p1; p2; token ]
       when String.equal p1 (fst prefix) && String.equal p2 (snd prefix) -> (
         match Hashtbl.find_opt tokens token with
@@ -290,13 +292,18 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
       if production
       then Letsencrypt.letsencrypt_production_url
       else Letsencrypt.letsencrypt_staging_url in
-    let priv = `RSA (gen_rsa ?seed:cfg.seed ()) in
+    let priv =
+      gen_key ?seed:cfg.certificate_seed ?bits:cfg.certificate_key_bits
+        cfg.certificate_key_type in
     match csr priv cfg.hostname with
     | Error _ as err -> Lwt.return err
     | Ok csr ->
+        let account_key =
+          gen_key ?seed:cfg.account_seed ?bits:cfg.account_key_bits
+            cfg.account_key_type in
         Acme.initialise ~ctx ~endpoint
           ?email:(Option.map Emile.to_string cfg.email)
-          (gen_rsa ?seed:cfg.seed ())
+          account_key
         >>? fun le ->
         let sleep sec = Time.sleep_ns (Duration.of_sec sec) in
         let solver = Letsencrypt.Client.http_solver solver in
@@ -316,10 +323,10 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
       | `Closed -> pp_write_error ppf `Closed
 
     let write stack cs =
-      write stack cs >|= Rresult.R.reword_error (fun err -> `Write_error err)
+      write stack cs >|= Result.map_error (fun err -> `Write_error err)
 
     let writev stack css =
-      writev stack css >|= Rresult.R.reword_error (fun err -> `Write_error err)
+      writev stack css >|= Result.map_error (fun err -> `Write_error err)
 
     type nonrec write_error =
       [ `Error of error | `Write_error of write_error | `Closed ]

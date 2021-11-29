@@ -11,37 +11,29 @@
     In other words, [Alpn] did the only choice to trust on [http/af] & [h2] to
     handle HTTP/1.0, HTTP/1.1 and H2 protocols. *)
 
-type ('reqd, 'hdr, 'req, 'resp, 'c, 'a) protocol =
-  | HTTP_1_1
-      : ( Httpaf.Reqd.t,
-          Httpaf.Headers.t,
-          Httpaf.Request.t,
-          Httpaf.Response.t,
-          'c,
-          'c Httpaf.Body.t )
-        protocol
-  | HTTP_2_0
-      : ( H2.Reqd.t,
-          H2.Headers.t,
-          H2.Request.t,
-          H2.Response.t,
-          'c,
-          'c H2.Body.t )
-        protocol  (** Type of protocols. *)
+type 'c capability = Rd : [ `read ] capability | Wr : [ `write ] capability
 
-type 'c body = Body : (_, _, _, _, 'c, 'v) protocol * 'v -> 'c body
+type body =
+  | Body_HTTP_1_1 : 'c capability * 'c httpaf_body -> body
+  | Body_HTTP_2_0 : 'c capability * 'c H2.Body.t -> body
 
-type request = Request : (_, _, 'r, _, _, _) protocol * 'r -> request
+and _ httpaf_body =
+  | Body_wr : Httpaf.Body.Writer.t -> [ `write ] httpaf_body
+  | Body_rd : Httpaf.Body.Reader.t -> [ `read ] httpaf_body
 
-type response = Response : (_, _, _, 'r, _, _) protocol * 'r -> response
+type response =
+  | Response_HTTP_1_1 of Httpaf.Response.t
+  | Response_HTTP_2_0 of H2.Response.t
 
-type headers = Headers : (_, 'hdr, _, _, _, _) protocol * 'hdr -> headers
+type request =
+  | Request_HTTP_1_1 of Httpaf.Request.t
+  | Request_HTTP_2_0 of H2.Request.t
 
-type 'c resp_handler =
-  | Resp_handler : (_, _, _, 'r, 'c, 'v) protocol * 'r * 'v -> 'c resp_handler
+type reqd = Reqd_HTTP_1_1 of Httpaf.Reqd.t | Reqd_HTTP_2_0 of H2.Reqd.t
 
-type 'c reqd_handler =
-  | Reqd_handler : ('r, _, _, _, 'c, 'v) protocol * 'r -> 'c reqd_handler
+type headers =
+  | Headers_HTTP_1_1 of Httpaf.Headers.t
+  | Headers_HTTP_2_0 of H2.Headers.t
 
 type server_error =
   [ `Bad_gateway | `Bad_request | `Exn of exn | `Internal_server_error ]
@@ -76,18 +68,14 @@ type 'flow info = {
 val service :
   'flow info ->
   error_handler:
-    (string ->
-    ?request:request ->
-    server_error ->
-    (headers -> [ `write ] body) ->
-    unit) ->
-  request_handler:(string -> [ `write ] reqd_handler -> unit) ->
+    (string -> ?request:request -> server_error -> (headers -> body) -> unit) ->
+  request_handler:(string -> reqd -> unit) ->
   ('t -> ('flow, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
   't Paf.service
 (** [service info ~error_handler ~request_handler accept close] creates a new
-    {!Paf.service} over the {i socket} ['t]. From the given implementation of
-    [accept] and [close], we are able to instantiate the {i main loop}. Then,
+    {!type:Paf.service} over the {i socket} ['t]. From the given implementation
+    of [accept] and [close], we are able to instantiate the {i main loop}. Then,
     from the given [info], we extract informations such the application layer
     protocol and choose which protocol we will use. Currently, if [info.alpn]
     returns:
@@ -95,7 +83,7 @@ val service :
     - [Some "http/1.0" | Some "http/1.1" | None], we launch an [http/af] service
     - [Some "h2"], we launch an [h2] service
 
-    The user is able to identify which protocol we launched by {!resd_handler}.
+    The user is able to identify which protocol we launched by {!resp_handler}.
     The returned service can be run with {!Paf.serve}. Here is an example with
     [Lwt_unix.file_descr] and the TCP/IP transmission protocol (without ALPN
     negotiation):
@@ -146,15 +134,24 @@ type client_error =
   | `Invalid_response_body_length_v2 of H2.Response.t
   | `Protocol_error of H2.Error_code.t * string ]
 
+val error_handler_v1 :
+  'edn ->
+  ('edn -> client_error -> unit) ->
+  Httpaf.Client_connection.error ->
+  unit
+
+val error_handler_v2 :
+  'edn -> ('edn -> client_error -> unit) -> H2.Client_connection.error -> unit
+
 val run :
   sleep:Paf.sleep ->
   ?alpn:string ->
   error_handler:('edn -> client_error -> unit) ->
-  response_handler:('edn -> [ `read ] resp_handler -> unit) ->
+  response_handler:('edn -> response -> body -> unit) ->
   'edn ->
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
   Mimic.flow ->
-  ([ `write ] body, [> `Msg of string ]) result Lwt.t
+  (body, [> `Msg of string ]) result Lwt.t
 (** [run ~sleep ?alpn ~error_handler ~response_handler edn req flow] tries
     communitate to [edn] via [flow] with a certain protocol according to the
     given [alpn] value and the given request. It returns the body of the request

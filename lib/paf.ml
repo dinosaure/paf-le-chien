@@ -316,7 +316,6 @@ and ('t, 'flow, 'error) posix = {
 
 let service connection accept close = Service { accept; connection; close }
 
-open Rresult
 open Lwt.Infix
 
 let serve_when_ready :

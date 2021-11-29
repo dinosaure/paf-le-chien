@@ -38,7 +38,7 @@
  (name test_cohttp)
  (modules test_cohttp)
  (libraries mirage-time-unix fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
-   cohttp-lwt paf-cohttp paf.mirage mirage-crypto-rng.unix))
+   cohttp-lwt paf-cohttp paf.mirage mirage-crypto-rng.unix astring))
 
 (rule
  (alias runtest)
