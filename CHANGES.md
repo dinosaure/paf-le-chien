@@ -1,3 +1,10 @@
+### 0.0.7 (2021-10-12) Paris - France
+
+- Avoid `astring` dependency (@dinosaure, #45)
+- Remove `rresult` dependency (@hannesm, @dinosaure, #47)
+- Upgrade the code-base with `mirage-stack.3.0.0` (@dinosaure, #49)
+- Update ALPN module without GADT (@dinosaure, #50)
+
 ### 0.0.6 (2021-10-11) Paris - France
 
 - Use `tls.0.15.0`, `x509.0.15.0` and `letsencrypt.0.4.0` (@hannesm, @dinosaure, #42)
