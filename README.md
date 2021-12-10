@@ -1,24 +1,25 @@
 ## Paf le chien - A MirageOS compatible layer for [HTTP/AF][httpaf] and [H2][h2]
 
 This library wants to provide an easy way to use HTTP/AF & H2 into a unikernel.
-It implements the global /loop/ with a protocol implementation.
+It implements the global /loop/ with a protocol implementation. The code, due to
+the compatibility with MirageOS, can work for `unix` too.
 
-The protocol implementation is given by [Mimic][mimic] and should be the
-[mirage-tcpip][mirage-tcpip] implementation - however, it can be something
-else.
+The protocol implementation is given by [mimic][mimic] and should be the
+[mirage-tcpip][mirage-tcpip] implementation.
 
 It does the composition between the TLS encryption layer and the
 [StackV4V6][stackv4v6] implementation to provide a way to initiate a TLS
-server.
+server. Via `mimic`, it still keeps the abstraction of the underlying
+TCP/IP connection used.
 
 ```ocaml
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
-  module P = Paf_mirage.make(Time)(Stack)
+  module Paf = Paf_mirage.make(Time)(Stack)
 
   let start stack =
-    let* t = P.init ~port:80 stack in
-    let service = P.http_service ~error_handler request_handler in
-    let `Initialized th = P.serve service t in
+    let* t = Paf.init ~port:80 stack in
+    let service = Paf.http_service ~error_handler request_handler in
+    let `Initialized th = Paf.serve service t in
     th
 end
 
@@ -28,18 +29,15 @@ include Make (Time) (Tcpip_stack_socket.V4V6)
 
 let stack () =
   let open Tcpip_stack_socket.V4V6 in
-  UDP.connect ~ipv4_only:false ~ipv6_only:false
-    Ipaddr.V4.Prefix.global None >>= fun udp ->
   TCP.connect ~ipv4_only:false ~ipv6_only:false
-    Ipaddr.V4.Prefix.global None >>= fun tcp ->
-  connect udp tcp
+    Ipaddr.V4.Prefix.global None
 
 let () = Lwt_main.run (stack () >>= start)
 ```
 
-It provides a client-side with the logic of Mimic and let the user to implement
-the resolution process to determine if the connection needs the TLS encryption
-layer or not.
+It also provides a client-side with the logic of mimic and let the user to
+implement the resolution process to determine if the connection needs the TLS
+encryption (and how) layer or not.
 
 ### Mimic
 
@@ -97,21 +95,25 @@ to download a Let's encrypt TLS certificate ready to launch an HTTPS server.
 ```ocaml
 let cfg =
   { LE.email= Result.to_option (Emile.of_string "romain@x25519.net")
-  ; LE.seed= None
+  ; LE.account_seed= None
+  ; LE.account_key_type= `ED25519
+  ; LE.account_key_bits= None
   ; LE.certificate_seed= None
+  ; LE.certificate_key_type= `ED25519
+  ; LE.certificate_key_bits= None
   ; LE.hostname= Domain_name.(host_exn (of_string_exn "x25519.net")) }
 
 let ctx = ... (* see [mimic] *)
 
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
+module Paf = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
 
-let get_tls_certificate () =
+let get_tls_certificate stack =
   Lwt_switch.with_switch @@ fun stop ->
-  let* t = P.init ~port:80 stack in
-  let service = P.http_service
+  let* t = Paf.init ~port:80 stack in
+  let service = Paf.http_service
     ~error_handler
     LE.request_handler in
-  let `Initialized th = P.serve ~stop service in
+  let `Initialized th = Paf.serve ~stop service in
   let fiber =
     LE.provision_certificate ~production:false cfg ctx >>= fun res ->
     Lwt_switch.turn_off stop >>= fun () -> Lwt.return res in
