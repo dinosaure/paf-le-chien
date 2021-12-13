@@ -12,7 +12,7 @@ depends: [
   "ocaml" {>= "4.08.0"}
   "dune" {>= "2.0.0"}
   "mirage-stack" {>= "3.0.0"}
-  "mirage-time"
+  "mirage-time" {>= "2.0.0"}
   "tls-mirage" {>= "0.15.0"}
   "mimic"
   "ke" {>= "0.4"}
@@ -32,6 +32,7 @@ depends: [
   "faraday" {>= "0.7.2"}
   "tls" {>= "0.15.0"}
   "cstruct" {>= "6.0.0"}
+  "mirage-protocols" {>= "7.0.0"}
 ]
 build: ["dune" "build" "-p" name "-j" jobs]
 run-test: ["dune" "runtest" "-p" name "-j" jobs]
