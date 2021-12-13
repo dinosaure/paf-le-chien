@@ -1,25 +1,11 @@
 [@@@warning "-45"]
+[@@@warning "-70"]
 
 module type DNS = sig
   type t
 
-  module Transport : Dns_client.S
-    with type io_addr = Ipaddr.t * int
-     and type +'a io = 'a Lwt.t
-
-  val nameserver : t -> Transport.ns_addr
-  val getaddrinfo : t -> ?nameserver:Transport.ns_addr -> 'response Dns.Rr_map.key -> 'a Domain_name.t ->
-    ('response, [> `Msg of string ]) result Lwt.t
-  val gethostbyname : t -> ?nameserver:Transport.ns_addr -> [ `host ] Domain_name.t ->
+  val gethostbyname : t -> [ `host ] Domain_name.t ->
     (Ipaddr.V4.t, [> `Msg of string ]) result Lwt.t
-  val gethostbyname6 : t -> ?nameserver:Transport.ns_addr -> [ `host ] Domain_name.t ->
-    (Ipaddr.V6.t, [> `Msg of string ]) result Lwt.t
-  val get_resource_record : t -> ?nameserver:Transport.ns_addr ->
-    'response Dns.Rr_map.key -> 'a Domain_name.t ->
-    ('response,
-     [> `Msg of string
-     | `No_data of [ `raw ] Domain_name.t * Dns.Soa.t
-     | `No_domain of [ `raw ] Domain_name.t * Dns.Soa.t ]) result Lwt.t
 end
 
 open Lwt.Infix
@@ -28,9 +14,9 @@ module Make
   (Console : Mirage_console.S)
   (Time : Mirage_time.S)
   (Pclock : Mirage_clock.PCLOCK)
-  (_ : Mirage_stack.V4V6)
+  (Stack : Mirage_stack.V4V6)
   (Dns : DNS) (* XXX(dinosaure): ask @hannesm to provide a signature. *)
-  (Paf : Paf_mirage.S) = struct
+  (Paf : Paf_mirage.S with type stack = Stack.TCP.t) = struct
   module Client = Paf_cohttp
   module Nss = Ca_certs_nss.Make(Pclock)
 
@@ -40,7 +26,7 @@ module Make
   let stack = Mimic.make ~name:"stack"
   let tls = Mimic.make ~name:"tls"
 
-  let with_stack v ctx = Mimic.add stack v ctx
+  let with_stack v ctx = Mimic.add stack (Stack.tcp v) ctx
 
   let with_tcp ctx =
     let k scheme stack ipaddr port = match scheme with

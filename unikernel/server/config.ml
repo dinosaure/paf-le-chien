@@ -38,10 +38,10 @@ let minipaf =
           ; Key.abstract production
           ; Key.abstract https ]
     ~packages:[ package "ca-certs-nss"
-              ; package "dns-client.mirage"
+              ; package "dns-client.mirage" ~min:"6.1.0"
               ; package "paf"
-              ; package "paf" ~sublibs:[ "mirage" ]
-              ; package "paf-le"
+              ; package "paf" ~min:"0.0.7" ~sublibs:[ "mirage" ]
+              ; package "paf-le" ~min:"0.0.7"
               ; package "rock" ]
     (console @-> random @-> time @-> mclock @-> pclock @-> stackv4v6 @-> job)
 
