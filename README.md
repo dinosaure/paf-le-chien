@@ -14,7 +14,7 @@ TCP/IP connection used.
 
 ```ocaml
 module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
-  module Paf = Paf_mirage.make(Time)(Stack)
+  module Paf = Paf_mirage.Make(Time)(Stack)
 
   let start stack =
     let* t = Paf.init ~port:80 stack in
