@@ -14,7 +14,7 @@
  (name paf_mirage)
  (public_name paf.mirage)
  (modules paf_mirage)
- (libraries paf tls-mirage mirage-time mirage-stack paf.alpn))
+ (libraries tcpip paf tls-mirage mirage-time paf.alpn))
 
 (library
  (name paf_cohttp)
@@ -27,5 +27,5 @@
  (wrapped false)
  (public_name paf-le)
  (modules lE)
- (libraries httpaf paf mirage-time mirage-stack duration tls-mirage emile
+ (libraries httpaf tcpip paf mirage-time duration tls-mirage emile
    letsencrypt))
