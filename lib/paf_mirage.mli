@@ -76,5 +76,5 @@ module type S = sig
     (Alpn.body, [> Mimic.error ]) result Lwt.t
 end
 
-module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
+module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) :
   S with type stack = Stack.TCP.t and type TCP.flow = Stack.TCP.flow

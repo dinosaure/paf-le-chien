@@ -9,7 +9,7 @@ type configuration = {
   account_key_bits : int option;
 }
 
-module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) : sig
+module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) : sig
   type nonrec configuration = configuration = {
     email : Emile.mailbox option;
     certificate_seed : string option;

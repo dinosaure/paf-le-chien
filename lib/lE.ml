@@ -222,7 +222,7 @@ struct
     call ?ctx ?body ?chunked ?headers `POST uri
 end
 
-module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
+module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
   type nonrec configuration = configuration = {
     email : Emile.mailbox option;
     certificate_seed : string option;

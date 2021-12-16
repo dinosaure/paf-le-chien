@@ -16,9 +16,9 @@ depends: [
   "emile" {>= "1.1"}
   "httpaf"
   "letsencrypt" {>= "0.4.0"}
-  "mirage-stack"
   "mirage-time"
   "tls-mirage"
+  "tcpip" {>= "7.0.0"}
   "x509" {>= "0.13.0"}
 ]
 build: ["dune" "build" "-p" name "-j" jobs]
