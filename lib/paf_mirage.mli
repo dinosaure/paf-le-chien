@@ -29,7 +29,7 @@ module type S = sig
   val http_service :
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (dst -> Httpaf.Server_connection.request_handler) ->
+    (TCP.flow -> dst -> Httpaf.Server_connection.request_handler) ->
     t Paf.service
   (** [http_service ~error_handler request_handler] makes an HTTP/AF service
       where any HTTP/1.1 requests are handled by [request_handler]. The returned
@@ -39,7 +39,7 @@ module type S = sig
     tls:Tls.Config.server ->
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (dst -> Httpaf.Server_connection.request_handler) ->
+    (TLS.flow -> dst -> Httpaf.Server_connection.request_handler) ->
     t Paf.service
   (** [https_service ~tls ~error_handler request_handler] makes an HTTP/AF
       service over TLS (from the given TLS configuration). Then, HTTP/1.1
