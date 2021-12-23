@@ -22,14 +22,14 @@ module type S = sig
   val http_service :
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (dst -> Httpaf.Server_connection.request_handler) ->
+    (TCP.flow -> dst -> Httpaf.Server_connection.request_handler) ->
     t Paf.service
 
   val https_service :
     tls:Tls.Config.server ->
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (dst -> Httpaf.Server_connection.request_handler) ->
+    (TLS.flow -> dst -> Httpaf.Server_connection.request_handler) ->
     t Paf.service
 
   val serve :
@@ -194,7 +194,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) :
     let connection flow =
       let dst = Stack.TCP.dst flow in
       let error_handler = error_handler dst in
-      let request_handler = request_handler dst in
+      let request_handler = request_handler flow dst in
       let conn =
         Httpaf.Server_connection.create ?config ~error_handler request_handler
       in
@@ -225,7 +225,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) :
               Stack.TCP.close flow >>= fun () -> Lwt.return_error err) in
     let connection (dst, flow) =
       let error_handler = error_handler dst in
-      let request_handler = request_handler dst in
+      let request_handler = request_handler flow dst in
       let conn =
         Httpaf.Server_connection.create ?config ~error_handler request_handler
       in

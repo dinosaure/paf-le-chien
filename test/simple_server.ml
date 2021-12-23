@@ -94,7 +94,7 @@ let http_ping_pong (_ip, _port) ic oc =
         Lwt.return_unit in
   Lwt.async go
 
-let request_handler large (ip, port) reqd =
+let request_handler large _flow (ip, port) reqd =
   let open Httpaf in
   let request = Reqd.request reqd in
   match request.Request.target with
