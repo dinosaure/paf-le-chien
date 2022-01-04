@@ -1,3 +1,8 @@
+### 0.0.8 (2022-04-01) Paris - France
+
+* Upgrade to `tcpip.7.0.0` (@dinosaure, #54)
+* Let the user to manipulate the incoming flow (@dinosaure, #55)
+
 ### 0.0.7 (2021-10-12) Paris - France
 
 - Avoid `astring` dependency (@dinosaure, #45)
