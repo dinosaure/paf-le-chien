@@ -28,7 +28,10 @@ module Make
 
   let get_certificate ?(production= false) cfg stackv4v6 =
     Paf.init ~port:80 (Stack.tcp stackv4v6) >>= fun t ->
-    let service = Paf.http_service ~error_handler Letsencrypt.request_handler in
+    let service =
+      Paf.http_service ~error_handler
+        (fun _flow -> Letsencrypt.request_handler)
+    in
     Lwt_switch.with_switch @@ fun stop ->
     let `Initialized th = Paf.serve ~stop service t in
     let ctx = Letsencrypt.ctx
