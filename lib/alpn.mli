@@ -34,9 +34,9 @@ type headers =
 type server_error =
   [ `Bad_gateway | `Bad_request | `Exn of exn | `Internal_server_error ]
 
-type 'flow info = {
+type ('flow, 'edn) info = {
   alpn : 'flow -> string option;
-  peer : 'flow -> string;
+  peer : 'flow -> 'edn;
   injection : 'flow -> Mimic.flow;
 }
 (** The type of information from a ['flow]:
@@ -62,10 +62,10 @@ type 'flow info = {
     ]} *)
 
 val service :
-  'flow info ->
+  ('flow, 'edn) info ->
   error_handler:
-    (string -> ?request:request -> server_error -> (headers -> body) -> unit) ->
-  request_handler:(string -> reqd -> unit) ->
+    ('edn -> ?request:request -> server_error -> (headers -> body) -> unit) ->
+  request_handler:('edn -> reqd -> unit) ->
   ('t -> ('flow, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
   't Paf.service

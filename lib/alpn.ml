@@ -37,9 +37,9 @@ module Httpaf_Client_connection = struct
     (next_read_operation t :> [ `Close | `Read | `Yield ])
 end
 
-type 'flow info = {
+type ('flow, 'edn) info = {
   alpn : 'flow -> string option;
-  peer : 'flow -> string;
+  peer : 'flow -> 'edn;
   injection : 'flow -> Mimic.flow;
 }
 
