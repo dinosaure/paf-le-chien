@@ -2,6 +2,8 @@ module type S = sig
   type stack
   (** The type of the TCP/IP stack. *)
 
+  type ipaddr
+
   (** {2 Protocols.}
 
       From the given stack, [Paf_mirage] constructs protocols needed for HTTP:
@@ -20,25 +22,21 @@ module type S = sig
   module TCP : sig
     include Mirage_flow.S
 
-    val dst : flow -> Ipaddr.t * int
+    val dst : flow -> ipaddr * int
   end
 
   module TLS : module type of Tls_mirage.Make (TCP)
 
-  val tcp_protocol : (stack * Ipaddr.t * int, TCP.flow) Mimic.protocol
+  val tcp_protocol : (stack * ipaddr * int, TCP.flow) Mimic.protocol
 
-  val tcp_edn : (stack * Ipaddr.t * int) Mimic.value
+  val tcp_edn : (stack * ipaddr * int) Mimic.value
 
   val tls_edn :
-    ([ `host ] Domain_name.t option
-    * Tls.Config.client
-    * stack
-    * Ipaddr.t
-    * int)
+    ([ `host ] Domain_name.t option * Tls.Config.client * stack * ipaddr * int)
     Mimic.value
 
   val tls_protocol :
-    ( [ `host ] Domain_name.t option * Tls.Config.client * stack * Ipaddr.t * int,
+    ( [ `host ] Domain_name.t option * Tls.Config.client * stack * ipaddr * int,
       TLS.flow )
     Mimic.protocol
 
@@ -47,7 +45,7 @@ module type S = sig
   type t
   (** The type of the {i socket} bound on a specific port (via {!init}). *)
 
-  type dst = Ipaddr.t * int
+  type dst = ipaddr * int
 
   val init : port:int -> stack -> t Lwt.t
   (** [init ~port stack] bounds the given [stack] to a specific port and return
@@ -127,8 +125,11 @@ module type S = sig
       [service]. [stop] can be used to stop the service. *)
 end
 
-module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) :
-  S with type stack = Stack.TCP.t and type TCP.flow = Stack.TCP.flow
+module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
+  S
+    with type stack = Stack.t
+     and type TCP.flow = Stack.flow
+     and type ipaddr = Stack.ipaddr
 
 (** {2 Client implementation.}
 

@@ -27,7 +27,7 @@ let src = Logs.Src.create "simple-client"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
+module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
 open Lwt.Infix
 
 let ( >>? ) x f =
