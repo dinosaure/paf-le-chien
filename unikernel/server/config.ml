@@ -1,8 +1,32 @@
 open Mirage
 
+type paf_server = Paf_server
+
+let paf_server = Type.v Paf_server
+
+let paf ~port =
+  let packages = [ package ~min:"0.0.8" "paf" ~sublibs:[ "mirage" ] ] in
+  let keys = [ Key.v port ] in
+  let connect _ modname = function
+    | [ _time; tcpv4v6; ] ->
+      Fmt.str "%s.init ~port:%a %s" modname Key.serialize_call (Key.v port) tcpv4v6
+    | _ -> assert false in
+  impl ~packages ~keys ~connect "Paf_mirage.Make"
+    (time @-> tcpv4v6 @-> paf_server)
+
+let tcpv4v6_of_stackv4v6 =
+  let connect _ modname = function
+    | [ stackv4v6 ] -> Fmt.str {ocaml|%s.connect %s|ocaml} modname stackv4v6
+    | _ -> assert false in
+  impl ~connect "Paf_mirage.TCPV4V6" (stackv4v6 @-> tcpv4v6)
+
+let tcpv4v6_of_stackv4v6 stackv4v6 = tcpv4v6_of_stackv4v6 $ stackv4v6
+
+let paf ~port ?(time= default_time) tcpv4v6 = paf ~port $ time $ tcpv4v6
+
 let port =
   let doc = Key.Arg.info ~doc:"port of HTTP service." [ "p"; "port" ] in
-  Key.(create "port" Arg.(opt (some int) None doc))
+  Key.(create "port" Arg.(opt int 8080 doc))
 
 let email =
   let doc = Key.Arg.info ~doc:"Let's encrypt email." [ "email" ] in
@@ -30,20 +54,17 @@ let https =
 
 let minipaf =
   foreign "Unikernel.Make"
-    ~keys:[ Key.abstract port
-          ; Key.abstract email
-          ; Key.abstract hostname
-          ; Key.abstract cert_seed
-          ; Key.abstract account_seed
-          ; Key.abstract production
-          ; Key.abstract https ]
+    ~keys:[ Key.v email
+          ; Key.v hostname
+          ; Key.v cert_seed
+          ; Key.v account_seed
+          ; Key.v production
+          ; Key.v https ]
     ~packages:[ package "ca-certs-nss"
-              ; package "dns-client.mirage" ~min:"6.1.0"
-              ; package "paf"
-              ; package "paf" ~min:"0.0.7" ~sublibs:[ "mirage" ]
-              ; package "paf-le" ~min:"0.0.7"
+              ; package "dns-client" ~min:"6.1.0" ~sublibs:[ "mirage" ]
+              ; package "paf-le" ~min:"0.0.8"
               ; package "rock" ]
-    (console @-> random @-> time @-> mclock @-> pclock @-> stackv4v6 @-> job)
+    (console @-> random @-> time @-> mclock @-> pclock @-> stackv4v6 @-> paf_server @-> job)
 
 let random = default_random
 let console = default_console
@@ -52,4 +73,6 @@ let pclock = default_posix_clock
 let mclock = default_monotonic_clock
 let stackv4v6 = generic_stackv4v6 default_network
 
-let () = register "minipaf" [ minipaf $ console $ random $ time $ mclock $ pclock $ stackv4v6 ]
+let () = register "minipaf"
+  [ minipaf $ console $ random $ time $ mclock $ pclock $ stackv4v6
+            $ paf ~port (tcpv4v6_of_stackv4v6 stackv4v6) ]
