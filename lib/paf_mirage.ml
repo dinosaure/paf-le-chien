@@ -286,3 +286,17 @@ let run ~sleep ~ctx ~error_handler ~response_handler request =
       Alpn.run ~sleep ~alpn ~error_handler ~response_handler flow request flow
   | Ok flow, Some (`TLS alpn) ->
       Alpn.run ~sleep ?alpn ~error_handler ~response_handler flow request flow
+
+module TCPV4V6 (Stack : Tcpip.Stack.V4V6) : sig
+  include
+    Tcpip.Tcp.S
+      with type t = Stack.TCP.t
+       and type ipaddr = Ipaddr.t
+       and type flow = Stack.TCP.flow
+
+  val connect : Stack.t -> t Lwt.t
+end = struct
+  include Stack.TCP
+
+  let connect stackv4v6 = Lwt.return (Stack.tcp stackv4v6)
+end

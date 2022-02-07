@@ -3,6 +3,7 @@ module type S = sig
   (** The type of the TCP/IP stack. *)
 
   type ipaddr
+  (** The type of the IP address. *)
 
   (** {2 Protocols.}
 
@@ -155,3 +156,13 @@ val run :
     the connection is recognized as a {!tls_protocol}, we proceed an ALPN
     challenge between what the user chosen and what the peer can handle.
     Otherwise, we send a simple HTTP/1.1 request or a [h2c] request. *)
+
+module TCPV4V6 (Stack : Tcpip.Stack.V4V6) : sig
+  include
+    Tcpip.Tcp.S
+      with type t = Stack.TCP.t
+       and type ipaddr = Ipaddr.t
+       and type flow = Stack.TCP.flow
+
+  val connect : Stack.t -> t Lwt.t
+end
