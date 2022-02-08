@@ -195,23 +195,21 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
       in
       Lwt.return_ok
         (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
-    Paf.service connection accept close
+    Paf.service connection Lwt.return_ok accept close
 
   let https_service ~tls ?config ~error_handler request_handler =
     let module R = (val Mimic.repr tls_protocol) in
-    let accept t =
-      accept t >>= function
-      | Error _ as err -> Lwt.return err
-      | Ok flow -> (
-          let dst = Stack.dst flow in
-          TLS.server_of_flow tls flow >>= function
-          | Ok flow -> Lwt.return_ok (dst, flow)
-          | Error `Closed ->
-              (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
-               * that the bound socket is closed but the socket with the peer is
-               * closed. *)
-              Lwt.return_error (`Write `Closed)
-          | Error err -> Stack.close flow >>= fun () -> Lwt.return_error err)
+    let handshake flow = 
+      let dst = Stack.dst flow in
+      TLS.server_of_flow tls flow >>= function
+      | Ok flow -> Lwt.return_ok (dst, flow)
+      | Error `Closed ->
+          (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
+           * that the bound socket is closed but the socket with the peer is
+           * closed. *)
+          Lwt.return_error (`Write `Closed)
+      | Error err ->
+          Stack.close flow >>= fun () -> Lwt.return_error err
     in
     let connection (dst, flow) =
       let error_handler = error_handler dst in
@@ -221,7 +219,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
       in
       Lwt.return_ok
         (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
-    Paf.service connection accept close
+    Paf.service connection handshake accept close
 
   let alpn =
     let module R = (val Mimic.repr tls_protocol) in
@@ -241,21 +239,20 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
 
   let alpn_service ~tls ?config:(_ = (Httpaf.Config.default, H2.Config.default))
       ~error_handler request_handler =
-    let accept t =
-      accept t >>= function
-      | Error _ as err -> Lwt.return err
-      | Ok flow -> (
-          let dst = Stack.dst flow in
-          TLS.server_of_flow tls flow >>= function
-          | Ok flow -> Lwt.return_ok (dst, flow)
-          | Error `Closed ->
-              Lwt.return_error
-                (`Msg (Fmt.str "%a" TLS.pp_write_error (`Write `Closed)))
-          | Error err ->
-              Stack.close flow >>= fun () ->
-              Lwt.return_error (`Msg (Fmt.str "%a" TLS.pp_write_error err)))
+    let handshake flow = 
+      let dst = Stack.dst flow in
+      TLS.server_of_flow tls flow >>= function
+      | Ok flow -> Lwt.return_ok (dst, flow)
+      | Error `Closed ->
+          (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
+           * that the bound socket is closed but the socket with the peer is
+           * closed. *)
+          Lwt.return_error (`Write `Closed)
+      | Error err ->
+          Stack.close flow >>= fun () ->
+          Lwt.return_error (err :> [ TLS.write_error | `Msg of string ])
     in
-    Alpn.service alpn ~error_handler ~request_handler accept close
+    Alpn.service alpn ~error_handler ~request_handler handshake accept close
 
   let serve ?stop service t = Paf.serve ~sleep:Time.sleep_ns ?stop service t
 end
