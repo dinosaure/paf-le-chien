@@ -66,14 +66,15 @@ type 'flow info = {
     ]} *)
 
 val service :
-  'flow info ->
+  'connected_flow info ->
   error_handler:
     (string -> ?request:request -> server_error -> (headers -> body) -> unit) ->
   request_handler:(string -> reqd -> unit) ->
+  ('flow -> ('connected_flow, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> ('flow, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
   't Paf.service
-(** [service info ~error_handler ~request_handler accept close] creates a new
+(** [service info ~error_handler ~request_handler connect accept close] creates a new
     {!type:Paf.service} over the {i socket} ['t]. From the given implementation
     of [accept] and [close], we are able to instantiate the {i main loop}. Then,
     from the given [info], we extract informations such the application layer

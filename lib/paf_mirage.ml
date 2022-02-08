@@ -200,29 +200,27 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
       in
       Lwt.return_ok
         (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
-    Paf.service connection accept close
+    Paf.service connection Lwt.return_ok accept close
 
   let https_service ~tls ?config ~error_handler request_handler =
     let module R = (val Mimic.repr tls_protocol) in
-    let accept t =
-      accept t >>= function
-      | Error _ as err -> Lwt.return err
-      | Ok flow -> (
-          let ((ipaddr, port) as dst) = Stack.TCP.dst flow in
-          TLS.server_of_flow tls flow >>= function
-          | Ok flow -> Lwt.return_ok (dst, flow)
-          | Error `Closed ->
-              (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
-               * that the bound socket is closed but the socket with the peer is
-               * closed. *)
-              Lwt.return_error (`Write `Closed)
-          | Error err ->
-              Log.err (fun m ->
-                  m
-                    "Got an error when we try to connect to the client (TLS) \
-                     to %a:%d: %a"
-                    Ipaddr.pp ipaddr port TLS.pp_write_error err) ;
-              Stack.TCP.close flow >>= fun () -> Lwt.return_error err) in
+    let connect flow = 
+      let ((ipaddr, port) as dst) = Stack.TCP.dst flow in
+      TLS.server_of_flow tls flow >>= function
+      | Ok flow -> Lwt.return_ok (dst, flow)
+      | Error `Closed ->
+          (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
+           * that the bound socket is closed but the socket with the peer is
+           * closed. *)
+          Lwt.return_error (`Write `Closed)
+      | Error err ->
+          Log.err (fun m ->
+              m
+                "Got an error when we try to connect to the client (TLS) \
+                 to %a:%d: %a"
+                Ipaddr.pp ipaddr port TLS.pp_write_error err) ;
+          Stack.TCP.close flow >>= fun () -> Lwt.return_error err
+    in
     let connection (dst, flow) =
       let error_handler = error_handler dst in
       let request_handler = request_handler dst in
@@ -231,7 +229,7 @@ module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) :
       in
       Lwt.return_ok
         (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
-    Paf.service connection accept close
+    Paf.service connection connect accept close
 
   let serve ?stop service t = Paf.serve ~sleep:Time.sleep_ns ?stop service t
 
