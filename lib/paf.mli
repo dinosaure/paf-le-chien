@@ -73,7 +73,8 @@ val run : 'conn runtime -> sleep:sleep -> 'conn -> Mimic.flow -> unit Lwt.t
 type 't service
 
 val service :
-  ('flow -> (Mimic.flow * impl, 'error) result Lwt.t) ->
+  ('connected_flow -> (Mimic.flow * impl, 'error) result Lwt.t) ->
+  ('flow -> ('connected_flow, 'error) result Lwt.t) ->
   ('t -> ('flow, ([> `Closed ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
   't service

@@ -26,7 +26,7 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let () = Mirage_crypto_rng_unix.initialize ()
 
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
+module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
 
 let unix_stack () =
   Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
@@ -87,17 +87,14 @@ let service ~request_handler () =
       Alpn.peer = peer_of_tls_connection;
       Alpn.injection;
     } in
-  let accept t =
-    P.accept t >>= function
-    | Error _ as err -> Lwt.return err
-    | Ok flow -> (
-        let edn = Tcpip_stack_socket.V4V6.TCP.dst flow in
-        P.TLS.server_of_flow tls flow >>= function
-        | Ok flow -> Lwt.return_ok (edn, flow)
-        | Error err ->
-            Lwt.return_error (`Msg (Fmt.str "%a" P.TLS.pp_write_error err)))
+  let handshake flow =
+    let edn = Tcpip_stack_socket.V4V6.TCP.dst flow in
+    P.TLS.server_of_flow tls flow >>= function
+    | Ok flow -> Lwt.return_ok (edn, flow)
+    | Error err ->
+        Lwt.return_error (`Msg (Fmt.str "%a" P.TLS.pp_write_error err))
   and close = P.close in
-  Alpn.service info ~error_handler ~request_handler accept close
+  Alpn.service info ~error_handler ~request_handler handshake P.accept close
 
 module R = (val Mimic.repr P.tls_protocol)
 

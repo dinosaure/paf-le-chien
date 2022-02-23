@@ -27,7 +27,7 @@ let src = Logs.Src.create "simple-client"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6)
+module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
 open Lwt.Infix
 
 let ( >>? ) x f =
@@ -133,6 +133,8 @@ let ctx =
          ~k:tls_connect)
   |> Mimic.(fold ipaddr Fun.[ req domain_name ] ~k:dns_resolve)
 
+let sleep v = Lwt_unix.sleep (Int64.to_float v)
+
 let run uri =
   let th, wk = Lwt.wait () in
   let f _ body =
@@ -168,8 +170,17 @@ let run uri =
   let response_handler = response_handler th_err ~f in
   v >>= fun v ->
   let ctx = Mimic.add stack (Tcpip_stack_socket.V4V6.tcp v) ctx in
-  P.run ~ctx ~error_handler:(error_handler wk_err) ~response_handler
-    (`V1 request)
+  (* XXX(dinosaure): we don't fill the [ctx] with [Paf_mirage.paf_transmission]
+   * which is fine because we only want to send HTTP/1.1 requests and we don't
+   * need to proceed the ALPN challenge - so we don't need to inform [Paf_mirage.run]
+   * about the type of the connection and if we got the ALPN protocol _via_ the [ctx]
+   * and [paf_transmission] - in the default case, we proceed an HTTP/1.1 request.
+   *
+   * However, if we want to test an {i alpn} service, we must refactorize the code
+   * above to automatically add [paf_transmission] as a proceeded information into
+   * the [ctx] after a [Mimic.unfold]. *)
+  Paf_mirage.run ~sleep ~ctx ~error_handler:(error_handler wk_err)
+    ~response_handler (`V1 request)
   >>= function
   | Error err ->
       Log.err (fun m -> m "Got an error: %a." Mimic.pp_error err) ;

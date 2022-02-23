@@ -302,31 +302,34 @@ type impl = Runtime : 'conn runtime * 'conn -> impl
 
 type 't service =
   | Service : {
-      accept : 't -> ('flow, ([> `Closed ] as 'error)) result Lwt.t;
+      accept : 't -> ('socket, ([> `Closed ] as 'error)) result Lwt.t;
+      handshake : 'socket -> ('flow, ([> `Closed ] as 'error)) result Lwt.t;
       connection : 'flow -> (Mimic.flow * impl, 'error) result Lwt.t;
       close : 't -> unit Lwt.t;
     }
       -> 't service
 
-and ('t, 'flow, 'error) posix = {
-  accept : 't -> ('flow, 'error) result Lwt.t;
+and ('t, 'socket, 'flow, 'error) posix = {
+  accept : 't -> ('socket, 'error) result Lwt.t;
+  handshake : 'socket -> ('flow, 'error) result Lwt.t;
   close : 't -> unit Lwt.t;
 }
   constraint 'error = [> `Closed ]
 
-let service connection accept close = Service { accept; connection; close }
+let service connection handshake accept close =
+  Service { accept; connection; handshake; close }
 
 open Lwt.Infix
 
 let serve_when_ready :
-    type t flow.
-    (t, flow, _) posix ->
+    type t socket flow.
+    (t, socket, flow, _) posix ->
     ?stop:Lwt_switch.t ->
     handler:(flow -> unit Lwt.t) ->
     t ->
     [ `Initialized of unit Lwt.t ] =
  fun service ?stop ~handler t ->
-  let { accept; close } = service in
+  let { accept; handshake; close } = service in
   `Initialized
     (let switched_off =
        let t, u = Lwt.wait () in
@@ -336,9 +339,18 @@ let serve_when_ready :
        t in
      let rec loop () =
        accept t >>= function
-       | Ok flow ->
-           Lwt.async (fun () -> handler flow) ;
-           Lwt.pause () >>= loop
+       | Ok socket ->
+           Lwt.async (fun () ->
+               handshake socket >>= function
+               | Ok flow -> handler flow
+               | Error `Closed ->
+                   Logs.info (fun m -> m "Connection closed by peer") ;
+                   Lwt.return ()
+               | Error _err ->
+                   Logs.err (fun m ->
+                       m "Got an error from a TCP/IP connection.") ;
+                   Lwt.return ()) ;
+           loop ()
        | Error `Closed -> Lwt.return_error `Closed
        | Error _ -> Lwt.pause () >>= loop in
      let stop_result =
@@ -353,12 +365,12 @@ let server : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
   Server.server ~sleep conn flow
 
 let serve ~sleep ?stop service t =
-  let (Service { accept; connection; close }) = service in
+  let (Service { accept; handshake; connection; close }) = service in
   let handler flow =
     connection flow >>= function
     | Ok (flow, Runtime (runtime, conn)) -> server runtime ~sleep conn flow
     | Error _ -> Lwt.return_unit in
-  serve_when_ready ?stop ~handler { accept; close } t
+  serve_when_ready ?stop ~handler { accept; handshake; close } t
 
 let run : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
  fun (module Runtime) ~sleep conn flow ->

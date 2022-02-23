@@ -37,9 +37,9 @@ module Httpaf_Client_connection = struct
     (next_read_operation t :> [ `Close | `Read | `Yield ])
 end
 
-type 'flow info = {
+type ('flow, 'edn) info = {
   alpn : 'flow -> string option;
-  peer : 'flow -> string;
+  peer : 'flow -> 'edn;
   injection : 'flow -> Mimic.flow;
 }
 
@@ -62,7 +62,7 @@ let error_handler_v2 edn f ?request error
     | _ -> assert false in
   f edn ?request (error :> server_error) response
 
-let service info ~error_handler ~request_handler accept close =
+let service info ~error_handler ~request_handler connect accept close =
   let connection flow =
     match info.alpn flow with
     | Some "http/1.0" | Some "http/1.1" | None ->
@@ -83,7 +83,7 @@ let service info ~error_handler ~request_handler accept close =
         Lwt.return_ok (flow, Paf.Runtime ((module H2.Server_connection), conn))
     | Some protocol ->
         Lwt.return_error (`Msg (Fmt.str "Invalid protocol %S." protocol)) in
-  Paf.service connection accept close
+  Paf.service connection connect accept close
 
 type client_error =
   [ `Exn of exn
