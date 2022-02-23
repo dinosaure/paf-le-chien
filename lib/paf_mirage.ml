@@ -199,7 +199,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
 
   let https_service ~tls ?config ~error_handler request_handler =
     let module R = (val Mimic.repr tls_protocol) in
-    let handshake flow = 
+    let handshake flow =
       let dst = Stack.dst flow in
       TLS.server_of_flow tls flow >>= function
       | Ok flow -> Lwt.return_ok (dst, flow)
@@ -208,9 +208,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
            * that the bound socket is closed but the socket with the peer is
            * closed. *)
           Lwt.return_error (`Write `Closed)
-      | Error err ->
-          Stack.close flow >>= fun () -> Lwt.return_error err
-    in
+      | Error err -> Stack.close flow >>= fun () -> Lwt.return_error err in
     let connection (dst, flow) =
       let error_handler = error_handler dst in
       let request_handler = request_handler flow dst in
@@ -239,7 +237,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
 
   let alpn_service ~tls ?config:(_ = (Httpaf.Config.default, H2.Config.default))
       ~error_handler request_handler =
-    let handshake flow = 
+    let handshake flow =
       let dst = Stack.dst flow in
       TLS.server_of_flow tls flow >>= function
       | Ok flow -> Lwt.return_ok (dst, flow)
@@ -250,8 +248,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
           Lwt.return_error (`Write `Closed)
       | Error err ->
           Stack.close flow >>= fun () ->
-          Lwt.return_error (err :> [ TLS.write_error | `Msg of string ])
-    in
+          Lwt.return_error (err :> [ TLS.write_error | `Msg of string ]) in
     Alpn.service alpn ~error_handler ~request_handler handshake accept close
 
   let serve ?stop service t = Paf.serve ~sleep:Time.sleep_ns ?stop service t

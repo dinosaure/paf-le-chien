@@ -316,13 +316,14 @@ and ('t, 'socket, 'flow, 'error) posix = {
 }
   constraint 'error = [> `Closed ]
 
-let service connection handshake accept close = Service { accept; connection; handshake; close }
+let service connection handshake accept close =
+  Service { accept; connection; handshake; close }
 
 open Lwt.Infix
 
 let serve_when_ready :
     type t socket flow.
-    (t, socket , flow, _) posix ->
+    (t, socket, flow, _) posix ->
     ?stop:Lwt_switch.t ->
     handler:(flow -> unit Lwt.t) ->
     t ->
@@ -339,14 +340,16 @@ let serve_when_ready :
      let rec loop () =
        accept t >>= function
        | Ok socket ->
-         Lwt.async (fun () -> (handshake socket >>= function
-         | Ok flow -> handler flow
-         | Error `Closed ->
-           Logs.info (fun m -> m "Connection closed by peer");
-           Lwt.return ()
-         | Error _err -> 
-           Logs.err (fun m -> m "Got an error from a TCP/IP connection.") ;
-           Lwt.return ()));
+           Lwt.async (fun () ->
+               handshake socket >>= function
+               | Ok flow -> handler flow
+               | Error `Closed ->
+                   Logs.info (fun m -> m "Connection closed by peer") ;
+                   Lwt.return ()
+               | Error _err ->
+                   Logs.err (fun m ->
+                       m "Got an error from a TCP/IP connection.") ;
+                   Lwt.return ()) ;
            loop ()
        | Error `Closed -> Lwt.return_error `Closed
        | Error _ -> Lwt.pause () >>= loop in
@@ -365,8 +368,7 @@ let serve ~sleep ?stop service t =
   let (Service { accept; handshake; connection; close }) = service in
   let handler flow =
     connection flow >>= function
-    | Ok (flow, Runtime (runtime, conn)) -> 
-      server runtime ~sleep conn flow
+    | Ok (flow, Runtime (runtime, conn)) -> server runtime ~sleep conn flow
     | Error _ -> Lwt.return_unit in
   serve_when_ready ?stop ~handler { accept; handshake; close } t
 
