@@ -1,3 +1,11 @@
+### 0.0.9 (2022-04-11) Paris - France
+
+- Fix unikernels (@hannesm, #58)
+- Improve the API and documentation (@dinosaure, #59)
+- Add TCPV4V6 module to be able to provide a simple functoria device (@dinosaure, #59)
+- The HTTP server requires a TCP/IP implementation instead of a Stack implementation (@dinosaure, #59)
+- Extend the API by an _handshake_ function which handle the TLS handshake (@TheLortex, #59)
+
 ### 0.0.8 (2022-04-01) Paris - France
 
 * Upgrade to `tcpip.7.0.0` (@dinosaure, #54)
