@@ -191,3 +191,4 @@ stress-test and we check that we don't have failure from the server.
 [ocaml-tls]: https://github.com/mirleft/ocaml-tls
 [lwt_ssl]: https://github.com/ocsigen/lwt_ssl
 [mirage-flow]: https://github.com/mirage/mirage-flow
+[h2]: https://github.com/anmonteiro/ocaml-h2
