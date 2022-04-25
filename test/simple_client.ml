@@ -40,21 +40,21 @@ let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
  fun resp body ->
   match (resp, body) with
   | Alpn.Response_HTTP_2_0 _, _ -> failf "Invalid protocol H2"
-  | Alpn.Response_HTTP_1_1 response, Alpn.Body_HTTP_1_1 (Alpn.Rd, body) -> (
+  | Alpn.Response_HTTP_1_1 response, Alpn.Body_HTTP_1_1 (Alpn.Rd, Alpn.Rd body) -> (
       let buf = Buffer.create 0x100 in
       let th, wk = Lwt.wait () in
       let on_eof () =
-        Httpaf.Body.close_reader body ;
+        Httpaf.Body.Reader.close body ;
         Lwt.wakeup_later wk () in
       let rec on_read payload ~off ~len =
         Buffer.add_string buf (Bigstringaf.substring payload ~off ~len) ;
-        Httpaf.Body.schedule_read body ~on_eof ~on_read in
-      Httpaf.Body.schedule_read body ~on_eof ~on_read ;
+        Httpaf.Body.Reader.schedule_read body ~on_eof ~on_read in
+      Httpaf.Body.Reader.schedule_read body ~on_eof ~on_read ;
       Lwt.async @@ fun () ->
       Lwt.pick [ (th >|= fun () -> `Done); th_err ] >>= function
       | `Done -> f response (Buffer.contents buf)
       | _ ->
-          Httpaf.Body.close_reader body ;
+          Httpaf.Body.Reader.close body ;
           Lwt.return_unit)
   | _ -> assert false
 
@@ -186,11 +186,11 @@ let run uri =
       Log.err (fun m -> m "Got an error: %a." Mimic.pp_error err) ;
       Lwt.return_error err
   | Ok (Alpn.Body_HTTP_2_0 _) -> Lwt.return_error (`Msg "Invalid protocol (H2)")
-  | Ok (Alpn.Body_HTTP_1_1 (Alpn.Wr, body)) -> (
-      Httpaf.Body.close_writer body ;
+  | Ok (Alpn.Body_HTTP_1_1 (Alpn.Wr, Alpn.Wr body)) -> (
+      Httpaf.Body.Writer.close body ;
       Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
       | `Body body -> Lwt.return_ok body
       | _ ->
-          Httpaf.Body.close_writer body ;
+          Httpaf.Body.Writer.close body ;
           Lwt.return_error (`Msg "Got an error while sending request"))
   | _ -> assert false
