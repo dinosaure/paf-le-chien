@@ -1,3 +1,7 @@
+### 0.0.8-1 (2022-05-21) Paris - France
+
+- Do the TLS handshake in an asynchronous task (@TheLortex, @hannesm, #64)
+
 ### 0.0.8 (2022-04-01) Paris - France
 
 * Upgrade to `tcpip.7.0.0` (@dinosaure, #54)
