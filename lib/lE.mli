@@ -25,6 +25,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) : sig
     Ipaddr.t * int -> Httpaf.Server_connection.request_handler
 
   val provision_certificate :
+    ?tries:int ->
     ?production:bool ->
     configuration ->
     Mimic.ctx ->
