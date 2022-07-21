@@ -236,7 +236,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
 
   module Acme = Letsencrypt.Client.Make (HTTP)
 
-  module Log = (val let src = Logs.Src.create "letsencrypt" in
+  module Log = (val let src = Logs.Src.create "paf-le" in
                     Logs.src_log src : Logs.LOG)
 
   let gen_key ?seed ?bits key_type =
@@ -260,14 +260,15 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     Lwt.return (Ok ())
 
   let request_handler (ipaddr, port) reqd =
-    Log.debug (fun m ->
-        m "Let's encrypt request handler for %a:%d" Ipaddr.pp ipaddr port) ;
     let req = Httpaf.Reqd.request reqd in
+    Log.debug (fun m ->
+        m "Let's encrypt request handler for %a:%d (%s)" Ipaddr.pp ipaddr port req.Httpaf.Request.target) ;
     match String.split_on_char '/' req.Httpaf.Request.target with
-    | [ p1; p2; token ]
+    | [ ""; p1; p2; token ]
       when String.equal p1 (fst prefix) && String.equal p2 (snd prefix) -> (
         match Hashtbl.find_opt tokens token with
         | Some data ->
+            Log.debug (fun m -> m "Be able to respond to let's encrypt!");
             let headers =
               Httpaf.Headers.of_list
                 [
@@ -277,6 +278,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
             let resp = Httpaf.Response.create ~headers `OK in
             Httpaf.Reqd.respond_with_string reqd resp data
         | None ->
+            Log.warn (fun m -> m "Token %S not found!" token);
             let headers = Httpaf.Headers.of_list [ ("connection", "close") ] in
             let resp = Httpaf.Response.create ~headers `Not_found in
             Httpaf.Reqd.respond_with_string reqd resp "")
@@ -285,7 +287,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         let resp = Httpaf.Response.create ~headers `Not_found in
         Httpaf.Reqd.respond_with_string reqd resp ""
 
-  let provision_certificate ?(production = false) cfg ctx =
+  let provision_certificate ?(tries= 10) ?(production = false) cfg ctx =
     let ( >>? ) = Lwt_result.bind in
     let endpoint =
       if production
@@ -297,6 +299,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     match csr priv cfg.hostname with
     | Error _ as err -> Lwt.return err
     | Ok csr ->
+        let open Lwt.Infix in
         let account_key =
           gen_key ?seed:cfg.account_seed ?bits:cfg.account_key_bits
             cfg.account_key_type in
@@ -304,10 +307,19 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
           ?email:(Option.map Emile.to_string cfg.email)
           account_key
         >>? fun le ->
+        Log.debug (fun m -> m "Let's encrypt state initialized.");
         let sleep sec = Time.sleep_ns (Duration.of_sec sec) in
         let solver = Letsencrypt.Client.http_solver solver in
-        Acme.sign_certificate ~ctx solver le sleep csr >>? fun certs ->
-        Lwt.return_ok (`Single (certs, priv))
+        let rec go tries =
+          Acme.sign_certificate ~ctx solver le sleep csr >>= function
+          | Ok certs -> Lwt.return_ok (`Single (certs, priv))
+          | Error (`Msg err) when tries > 0 ->
+            Log.warn (fun m -> m "Got an error when we tried to get a certificate: %s (tries: %d)" err tries);
+            go (pred tries)
+          | Error (`Msg err) ->
+            Log.err (fun m -> m "Got an error when we tried to get a certificate: %s" err);
+            Lwt.return (Error (`Msg err)) in
+        go tries
 
   open Lwt.Infix
 
