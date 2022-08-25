@@ -52,16 +52,16 @@ let getline queue =
 
 let http_large filename (_ip, _port) ic oc =
   let open Httpaf in
-  Body.close_reader ic ;
+  Body.Reader.close ic ;
   let ic = open_in filename in
   let tp = Bytes.create 0x1000 in
   let rec go () =
     match input ic tp 0 (Bytes.length tp) with
-    | 0 -> Body.close_writer oc
+    | 0 -> Body.Writer.close oc
     | len ->
-        Body.write_string oc (Bytes.sub_string tp 0 len) ;
+        Body.Writer.write_string oc (Bytes.sub_string tp 0 len) ;
         go ()
-    | exception End_of_file -> Body.close_writer oc in
+    | exception End_of_file -> Body.Writer.close oc in
   go () ;
   close_in ic
 
@@ -75,22 +75,22 @@ let http_ping_pong (_ip, _port) ic oc =
   let on_eof () = closed := true in
   let rec on_read buf ~off ~len =
     Ke.N.push queue ~blit ~length:Bigstringaf.length buf ~off ~len ;
-    Body.schedule_read ic ~on_eof ~on_read in
-  Body.schedule_read ic ~on_eof ~on_read ;
+    Body.Reader.schedule_read ic ~on_eof ~on_read in
+  Body.Reader.schedule_read ic ~on_eof ~on_read ;
   let rec go () =
     match (!closed, getline queue) with
     | false, None -> Lwt.pause () >>= go
     | false, Some "ping" ->
-        Body.write_string oc "pong\n" ;
+        Body.Writer.write_string oc "pong\n" ;
         go ()
     | false, Some "pong" ->
-        Body.write_string oc "ping\n" ;
+        Body.Writer.write_string oc "ping\n" ;
         go ()
     | false, Some _line ->
-        Body.close_writer oc ;
+        Body.Writer.close oc ;
         Lwt.return_unit
     | true, _ ->
-        Body.close_writer oc ;
+        Body.Writer.close oc ;
         Lwt.return_unit in
   Lwt.async go
 

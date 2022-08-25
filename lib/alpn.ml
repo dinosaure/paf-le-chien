@@ -1,8 +1,11 @@
 type 'c capability = Rd : [ `read ] capability | Wr : [ `write ] capability
 
 type body =
-  | Body_HTTP_1_1 : 'c capability * 'c Httpaf.Body.t -> body
+  | Body_HTTP_1_1 : 'c capability * 'c httpaf_body -> body
   | Body_HTTP_2_0 : 'c capability * 'c H2.Body.t -> body
+and 'c httpaf_body =
+  | Rd : Httpaf.Body.Reader.t -> [ `read ] httpaf_body
+  | Wr : Httpaf.Body.Writer.t -> [ `write ] httpaf_body
 
 type response =
   | Response_HTTP_1_1 of Httpaf.Response.t
@@ -19,7 +22,7 @@ type headers =
   | Headers_HTTP_2_0 of H2.Headers.t
 
 let response_handler_v1_1 capability edn f resp body =
-  f edn (Response_HTTP_1_1 resp) (Body_HTTP_1_1 (capability, body))
+  f edn (Response_HTTP_1_1 resp) (Body_HTTP_1_1 (capability, Rd body))
 
 let response_handler_v2_0 capability edn f resp body =
   f edn (Response_HTTP_2_0 resp) (Body_HTTP_2_0 (capability, body))
@@ -47,10 +50,12 @@ type server_error =
   [ `Bad_gateway | `Bad_request | `Exn of exn | `Internal_server_error ]
 
 let error_handler_v1 edn f ?request error
-    (response : Httpaf.Headers.t -> [ `write ] Httpaf.Body.t) =
+    (response : Httpaf.Headers.t -> Httpaf.Body.Writer.t) =
   let request = Option.map (fun req -> Request_HTTP_1_1 req) request in
   let response = function
-    | Headers_HTTP_1_1 headers -> Body_HTTP_1_1 (Wr, response headers)
+    | Headers_HTTP_1_1 headers ->
+      let body = response headers in
+      Body_HTTP_1_1 (Wr, Wr body)
     | _ -> assert false in
   f edn ?request (error :> server_error) response
 
@@ -127,7 +132,7 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
           ~response_handler in
       Lwt.async (fun () ->
           Paf.run (module Httpaf_Client_connection) ~sleep conn flow) ;
-      Lwt.return_ok (Body_HTTP_1_1 (Wr, body))
+      Lwt.return_ok (Body_HTTP_1_1 (Wr, Wr body))
   | Some protocol, _ ->
       Lwt.return_error
         (`Msg (Fmt.str "Invalid Application layer protocol: %S" protocol))

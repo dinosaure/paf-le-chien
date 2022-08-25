@@ -14,8 +14,11 @@
 type 'c capability = Rd : [ `read ] capability | Wr : [ `write ] capability
 
 type body =
-  | Body_HTTP_1_1 : 'c capability * 'c Httpaf.Body.t -> body
+  | Body_HTTP_1_1 : 'c capability * 'c httpaf_body -> body
   | Body_HTTP_2_0 : 'c capability * 'c H2.Body.t -> body
+and 'c httpaf_body =
+  | Rd : Httpaf.Body.Reader.t -> [ `read ] httpaf_body
+  | Wr : Httpaf.Body.Writer.t -> [ `write ] httpaf_body
 
 type response =
   | Response_HTTP_1_1 of Httpaf.Response.t
