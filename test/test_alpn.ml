@@ -155,6 +155,13 @@ let test01 =
       Lwt.return_unit
   | _ -> Alcotest.failf "Unexpected version of HTTP"
 
+let close_body = function
+  | Alpn.Body_HTTP_1_1 (_cap, _body) as body -> body
+  | Alpn.Body_HTTP_2_0 (_cap, Wr body) as v ->
+      H2.Body.Writer.close body ;
+      v
+  | Alpn.Body_HTTP_2_0 (_cap, Rd _body) as body -> body
+
 let test02 =
   Alcotest_lwt.test_case "h2" `Quick @@ fun _sw () ->
   let port = port () in
@@ -165,7 +172,7 @@ let test02 =
     | Alpn.Reqd_HTTP_1_1 _ ->
         Lwt.wakeup_later wk_request HTTP_1_1 ;
         Lwt.wakeup_later wk ()
-    | Alpn.Reqd_HTTP_2_0 _ ->
+    | Alpn.Reqd_HTTP_2_0 _reqd ->
         Lwt.wakeup_later wk_request HTTP_2_0 ;
         Lwt.wakeup_later wk () in
   let response_handler () : Alpn.response -> Alpn.body -> unit = fun _ _ -> () in
@@ -177,7 +184,7 @@ let test02 =
       P.init ~port stack >>= fun t ->
       P.serve ~stop service t |> fun (`Initialized th) ->
       let ctx = ctx_with_tls stack ~port tls in
-      Lwt.both (client ~ctx ~response_handler req) th )
+      Lwt.both (client ~ctx ~response_handler req >|= close_body) th )
     (th >>= fun () -> Lwt_switch.turn_off stop)
   >>= fun ((body, ()), ()) ->
   request >>= fun request ->
