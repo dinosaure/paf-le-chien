@@ -2,7 +2,11 @@ type 'c capability = Rd : [ `read ] capability | Wr : [ `write ] capability
 
 type body =
   | Body_HTTP_1_1 : 'c capability * 'c Httpaf.Body.t -> body
-  | Body_HTTP_2_0 : 'c capability * 'c H2.Body.t -> body
+  | Body_HTTP_2_0 : 'c capability * 'c h2_body -> body
+
+and 'c h2_body =
+  | Wr : H2.Body.Writer.t -> [ `write ] h2_body
+  | Rd : H2.Body.Reader.t -> [ `read ] h2_body
 
 type response =
   | Response_HTTP_1_1 of Httpaf.Response.t
@@ -22,7 +26,7 @@ let response_handler_v1_1 capability edn f resp body =
   f edn (Response_HTTP_1_1 resp) (Body_HTTP_1_1 (capability, body))
 
 let response_handler_v2_0 capability edn f resp body =
-  f edn (Response_HTTP_2_0 resp) (Body_HTTP_2_0 (capability, body))
+  f edn (Response_HTTP_2_0 resp) (Body_HTTP_2_0 (capability, Rd body))
 
 let request_handler_v1 edn f reqd = f edn (Reqd_HTTP_1_1 reqd)
 let request_handler_v2 edn f reqd = f edn (Reqd_HTTP_2_0 reqd)
@@ -54,10 +58,10 @@ let error_handler_v1 edn f ?request error
   f edn ?request (error :> server_error) response
 
 let error_handler_v2 edn f ?request error
-    (response : H2.Headers.t -> [ `write ] H2.Body.t) =
+    (response : H2.Headers.t -> H2.Body.Writer.t) =
   let request = Option.map (fun req -> Request_HTTP_2_0 req) request in
   let response = function
-    | Headers_HTTP_2_0 headers -> Body_HTTP_2_0 (Wr, response headers)
+    | Headers_HTTP_2_0 headers -> Body_HTTP_2_0 (Wr, Wr (response headers))
     | _ -> assert false in
   f edn ?request (error :> server_error) response
 
@@ -117,7 +121,7 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
           ~response_handler in
       Lwt.async (fun () ->
           Paf.run (module H2.Client_connection) ~sleep conn flow) ;
-      Lwt.return_ok (Body_HTTP_2_0 (Wr, body))
+      Lwt.return_ok (Body_HTTP_2_0 (Wr, Wr body))
   | (Some "http/1.1" | None), `V1 request ->
       let error_handler = error_handler_v1 edn error_handler in
       let response_handler = response_handler_v1_1 Rd edn response_handler in
