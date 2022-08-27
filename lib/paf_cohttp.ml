@@ -1,25 +1,18 @@
 let ( <.> ) f g x = f (g x)
-
 let src = Logs.Src.create "paf-cohttp"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
 let scheme = Mimic.make ~name:"paf-scheme"
-
 let port = Mimic.make ~name:"paf-port"
-
 let domain_name = Mimic.make ~name:"paf-domain-name"
-
 let ipaddr = Mimic.make ~name:"paf-ipaddr"
-
 let sleep = Mimic.make ~name:"paf-sleep"
 
 type ctx = Mimic.ctx
 
 let default_ctx = Mimic.empty
-
 let httpaf_config = Mimic.make ~name:"httpaf-config"
-
 let error_handler mvar err = Lwt.async @@ fun () -> Lwt_mvar.put mvar err
 
 let response_handler mvar pusher resp body =
@@ -55,9 +48,7 @@ let transmit cohttp_body httpaf_body =
   | `Stream stream -> Lwt.async @@ fun () -> unroll httpaf_body stream
 
 exception Internal_server_error
-
 exception Invalid_response_body_length of Httpaf.Response.t
-
 exception Malformed_response of string
 
 let with_uri uri ctx =
@@ -217,7 +208,6 @@ let call ?(ctx = default_ctx) ?headers
 open Lwt.Infix
 
 let head ?ctx ?headers uri = call ?ctx ?headers `HEAD uri >|= fst
-
 let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
 
 let delete ?ctx ?body ?chunked ?headers uri =
@@ -233,7 +223,6 @@ let patch ?ctx ?body ?chunked ?headers uri =
   call ?ctx ?body ?chunked ?headers `PATCH uri
 
 let post_form ?ctx:_ ?headers:_ ~params:_ _uri = assert false (* TODO *)
-
 let callv ?ctx:_ _uri _stream = assert false (* TODO *)
 
 [@@@warning "-32"]

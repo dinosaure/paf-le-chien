@@ -61,7 +61,6 @@ module type RUNTIME = sig
 end
 
 type sleep = int64 -> unit Lwt.t
-
 type 'conn runtime = (module RUNTIME with type t = 'conn)
 
 module Make (Flow : Mirage_flow.S) = struct
@@ -177,7 +176,6 @@ end = struct
   let src = Logs.Src.create "paf-server"
 
   module Log = (val Logs.src_log src : Logs.LOG)
-
   module Easy_flow = Make (Flow)
   open Lwt.Infix
 
@@ -243,7 +241,6 @@ end = struct
   let src = Logs.Src.create "paf"
 
   module Log = (val Logs.src_log src : Logs.LOG)
-
   module Easy_flow = Make (Flow)
 
   let run ~sleep connection flow =

@@ -1,6 +1,5 @@
 module type S = sig
   type stack
-
   type ipaddr
 
   module TCP : sig
@@ -12,7 +11,6 @@ module type S = sig
   module TLS : module type of Tls_mirage.Make (TCP)
 
   val tcp_protocol : (stack * ipaddr * int, TCP.flow) Mimic.protocol
-
   val tcp_edn : (stack * ipaddr * int) Mimic.value
 
   val tls_edn :
@@ -25,13 +23,10 @@ module type S = sig
     Mimic.protocol
 
   type t
-
   type dst = ipaddr * int
 
   val init : port:int -> stack -> t Lwt.t
-
   val accept : t -> (TCP.flow, [> `Closed ]) result Lwt.t
-
   val close : t -> unit Lwt.t
 
   val http_service :
@@ -71,14 +66,12 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
   open Lwt.Infix
 
   type ipaddr = Stack.ipaddr
-
   type dst = ipaddr * int
 
   module TCP = struct
     let src = Logs.Src.create "paf-tcp"
 
     module Log = (val Logs.src_log src : Logs.LOG)
-
     include Stack
 
     type endpoint = Stack.t * Stack.ipaddr * int
@@ -110,7 +103,6 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
     let src = Logs.Src.create "paf-tls"
 
     module Log = (val Logs.src_log src : Logs.LOG)
-
     include Tls_mirage.Make (TCP)
 
     type endpoint =

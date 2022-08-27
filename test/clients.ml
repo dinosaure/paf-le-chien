@@ -1,7 +1,6 @@
 open Fiber
 
 let pr fmt = Format.printf fmt
-
 let epr fmt = Format.eprintf fmt
 
 external now : unit -> (int64[@unboxed]) = "b_mclock" "n_mclock" [@@noalloc]
@@ -43,13 +42,9 @@ let count ~p arr =
   !res
 
 let fold ~f a v = Array.fold_left f a v
-
 let map ~f a = Array.map f a
-
 let is_ok = function Ok _ -> true | _ -> false
-
 let is_error = function Error _ -> true | _ -> false
-
 let get_ok = function Ok v -> v | Error _ -> assert false
 
 let to_sec x =
@@ -103,7 +98,6 @@ let show_bar width ppf proportion =
   Format.pp_print_string ppf "│"
 
 let exit_failure = 1
-
 let exit_success = 0
 
 let show res =
@@ -137,9 +131,7 @@ let show res =
     exit exit_success
 
 let concurrency = ref 50
-
 let number = ref 200
-
 let uri = ref None
 
 let anonymous_argument v =

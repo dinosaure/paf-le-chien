@@ -29,7 +29,6 @@ module type S = sig
   module TLS : module type of Tls_mirage.Make (TCP)
 
   val tcp_protocol : (stack * ipaddr * int, TCP.flow) Mimic.protocol
-
   val tcp_edn : (stack * ipaddr * int) Mimic.value
 
   val tls_edn :
