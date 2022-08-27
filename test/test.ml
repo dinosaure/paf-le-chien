@@ -1,5 +1,4 @@
 let null = Unix.openfile "/dev/null" Unix.[ O_CLOEXEC ] 0o644
-
 let () = at_exit (fun () -> try Unix.close null with _exn -> ())
 
 let create_lock filename =
@@ -8,7 +7,6 @@ let create_lock filename =
   fd
 
 let lock fd = Unix.lockf fd Unix.F_LOCK 0
-
 let unlock fd = Unix.lockf fd Unix.F_ULOCK 0
 
 (* XXX(dinosaure): this test wants to check with **true** parallelism
@@ -77,9 +75,7 @@ let launch_clients c n uri =
   Format.printf "\n%!"
 
 let concurrency = ref 50
-
 let number = ref 200
-
 let anonymous_argument _ = ()
 
 let spec =

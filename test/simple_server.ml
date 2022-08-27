@@ -13,7 +13,6 @@ let reporter ppf =
   { Logs.report }
 
 let sigpipe = 13
-
 let () = Mirage_crypto_rng_unix.initialize ()
 
 (*
@@ -23,11 +22,9 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 *)
 
 let () = Sys.set_signal sigpipe Sys.Signal_ignore
-
 let src = Logs.Src.create "simple-server"
 
 module Log = (val Logs.src_log src : Logs.LOG)
-
 module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
 module Ke = Ke.Rke
 
@@ -133,13 +130,9 @@ let ( >>? ) x f =
   x >>= function Ok x -> f x | Error _ as err -> Lwt.return err
 
 let fd_8080 = Unix.openfile "lock.8080" Unix.[ O_CREAT; O_RDWR ] 0o644
-
 let () = at_exit (fun () -> try Unix.close fd_8080 with _exn -> ())
-
 let fd_4343 = Unix.openfile "lock.4343" Unix.[ O_CREAT; O_RDWR ] 0o644
-
 let () = at_exit (fun () -> try Unix.close fd_4343 with _exn -> ())
-
 let unlock fd = Unix.lockf fd Unix.F_ULOCK 0
 
 let server_http large stack =

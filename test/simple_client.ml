@@ -20,13 +20,10 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 *)
 
 let failf fmt = Format.kasprintf failwith fmt
-
 let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
-
 let src = Logs.Src.create "simple-client"
 
 module Log = (val Logs.src_log src : Logs.LOG)
-
 module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
 open Lwt.Infix
 
@@ -84,15 +81,10 @@ let v =
   >>= fun tcpv4 -> Tcpip_stack_socket.V4V6.connect udpv4 tcpv4
 
 let stack = Mimic.make ~name:"stack"
-
 let ipaddr = Mimic.make ~name:"ipaddr"
-
 let port = Mimic.make ~name:"port"
-
 let domain_name = Mimic.make ~name:"domain-name"
-
 let scheme = Mimic.make ~name:"scheme"
-
 let tls = Mimic.make ~name:"tls"
 
 let tcp_connect scheme stack ipaddr port =

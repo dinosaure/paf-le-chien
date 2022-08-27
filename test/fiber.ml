@@ -5,11 +5,8 @@ module Log = (val Logs.src_log src : Logs.LOG)
 type 'a t = ('a -> unit) -> unit
 
 let return x k = k x
-
 let ( >>> ) a b k = a (fun () -> b k)
-
 let ( >>= ) t f k = t (fun x -> f x k)
-
 let ( >>| ) t f k = t (fun x -> k (f x))
 
 let both a b =
@@ -18,7 +15,6 @@ let both a b =
 
 module Ivar = struct
   type 'a state = Full of 'a | Empty of ('a -> unit) Queue.t
-
   type 'a t = { mutable state : 'a state }
 
   let create () = { state = Empty (Queue.create ()) }
@@ -98,13 +94,9 @@ let create_process prgn =
       (out0, pid)
 
 let concurrency = ref 4
-
 let running = Hashtbl.create ~random:false !concurrency
-
 let waiting_for_slot = Queue.create ()
-
 let set_concurrency n = concurrency := n
-
 let get_concurrency () = !concurrency
 
 let throttle () =

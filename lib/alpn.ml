@@ -25,7 +25,6 @@ let response_handler_v2_0 capability edn f resp body =
   f edn (Response_HTTP_2_0 resp) (Body_HTTP_2_0 (capability, body))
 
 let request_handler_v1 edn f reqd = f edn (Reqd_HTTP_1_1 reqd)
-
 let request_handler_v2 edn f reqd = f edn (Reqd_HTTP_2_0 reqd)
 
 module Httpaf_Client_connection = struct

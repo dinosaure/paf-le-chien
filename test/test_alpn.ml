@@ -1,7 +1,6 @@
 open Lwt.Infix
 
 let ( <.> ) f g x = f (g x)
-
 let ( >>? ) = Lwt_result.bind
 
 let reporter ppf =
@@ -19,11 +18,8 @@ let reporter ppf =
   { Logs.report }
 
 let () = Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true ()
-
 let () = Logs.set_reporter (reporter Fmt.stderr)
-
 let () = Logs.set_level ~all:true (Some Logs.Debug)
-
 let () = Mirage_crypto_rng_unix.initialize ()
 
 module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
@@ -192,5 +188,4 @@ let test02 =
   | _ -> Alcotest.failf "Unexpected version of HTTP"
 
 let test () = Alcotest_lwt.run "alpn" [ ("alpn", [ test01; test02 ]) ]
-
 let () = Lwt_main.run (test ())

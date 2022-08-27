@@ -14,13 +14,9 @@ type configuration = {
 }
 
 let scheme = Mimic.make ~name:"paf-le-scheme"
-
 let port = Mimic.make ~name:"paf-le-port"
-
 let domain_name = Mimic.make ~name:"paf-le-domain-name"
-
 let ipaddr = Mimic.make ~name:"paf-le-ipaddr"
-
 let sleep = Mimic.make ~name:"paf-le-sleep"
 
 module Httpaf_Client_connection = struct
@@ -102,7 +98,6 @@ struct
     include Httpaf.Headers
 
     let init_with field value = of_list [ (field, value) ]
-
     let get_location hdrs = Option.map Uri.of_string (get hdrs "location")
   end
 
@@ -128,7 +123,6 @@ struct
     include Httpaf.Response
 
     let status resp = Httpaf.Status.to_code resp.Httpaf.Response.status
-
     let headers resp = resp.Httpaf.Response.headers
   end
 
@@ -165,7 +159,6 @@ struct
     | `Stream stream -> Lwt.async @@ fun () -> unroll httpaf_body stream
 
   exception Invalid_response_body_length of Httpaf.Response.t
-
   exception Malformed_response of string
 
   let call ?(ctx = Mimic.empty) ?(headers = Httpaf.Headers.empty)
@@ -215,7 +208,6 @@ struct
   open Lwt.Infix
 
   let head ?ctx ?headers uri = call ?ctx ?headers `HEAD uri >|= fst
-
   let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
 
   let post ?ctx ?body ?chunked ?headers uri =
@@ -252,7 +244,6 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     X509.Signing_request.create cn key
 
   let prefix = (".well-known", "acme-challenge")
-
   let tokens = Hashtbl.create 1
 
   let solver _host ~prefix:_ ~token ~content =
@@ -262,13 +253,14 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
   let request_handler (ipaddr, port) reqd =
     let req = Httpaf.Reqd.request reqd in
     Log.debug (fun m ->
-        m "Let's encrypt request handler for %a:%d (%s)" Ipaddr.pp ipaddr port req.Httpaf.Request.target) ;
+        m "Let's encrypt request handler for %a:%d (%s)" Ipaddr.pp ipaddr port
+          req.Httpaf.Request.target) ;
     match String.split_on_char '/' req.Httpaf.Request.target with
     | [ ""; p1; p2; token ]
       when String.equal p1 (fst prefix) && String.equal p2 (snd prefix) -> (
         match Hashtbl.find_opt tokens token with
         | Some data ->
-            Log.debug (fun m -> m "Be able to respond to let's encrypt!");
+            Log.debug (fun m -> m "Be able to respond to let's encrypt!") ;
             let headers =
               Httpaf.Headers.of_list
                 [
@@ -278,7 +270,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
             let resp = Httpaf.Response.create ~headers `OK in
             Httpaf.Reqd.respond_with_string reqd resp data
         | None ->
-            Log.warn (fun m -> m "Token %S not found!" token);
+            Log.warn (fun m -> m "Token %S not found!" token) ;
             let headers = Httpaf.Headers.of_list [ ("connection", "close") ] in
             let resp = Httpaf.Response.create ~headers `Not_found in
             Httpaf.Reqd.respond_with_string reqd resp "")
@@ -287,7 +279,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         let resp = Httpaf.Response.create ~headers `Not_found in
         Httpaf.Reqd.respond_with_string reqd resp ""
 
-  let provision_certificate ?(tries= 10) ?(production = false) cfg ctx =
+  let provision_certificate ?(tries = 10) ?(production = false) cfg ctx =
     let ( >>? ) = Lwt_result.bind in
     let endpoint =
       if production
@@ -307,18 +299,23 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
           ?email:(Option.map Emile.to_string cfg.email)
           account_key
         >>? fun le ->
-        Log.debug (fun m -> m "Let's encrypt state initialized.");
+        Log.debug (fun m -> m "Let's encrypt state initialized.") ;
         let sleep sec = Time.sleep_ns (Duration.of_sec sec) in
         let solver = Letsencrypt.Client.http_solver solver in
         let rec go tries =
           Acme.sign_certificate ~ctx solver le sleep csr >>= function
           | Ok certs -> Lwt.return_ok (`Single (certs, priv))
           | Error (`Msg err) when tries > 0 ->
-            Log.warn (fun m -> m "Got an error when we tried to get a certificate: %s (tries: %d)" err tries);
-            go (pred tries)
+              Log.warn (fun m ->
+                  m
+                    "Got an error when we tried to get a certificate: %s \
+                     (tries: %d)"
+                    err tries) ;
+              go (pred tries)
           | Error (`Msg err) ->
-            Log.err (fun m -> m "Got an error when we tried to get a certificate: %s" err);
-            Lwt.return (Error (`Msg err)) in
+              Log.err (fun m ->
+                  m "Got an error when we tried to get a certificate: %s" err) ;
+              Lwt.return (Error (`Msg err)) in
         go tries
 
   open Lwt.Infix
