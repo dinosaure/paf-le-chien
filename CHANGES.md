@@ -1,3 +1,9 @@
+### 0.1.0 (2022-08-28) Paris - France
+
+- Fix the Let's encrypt support (@dinosaure, #65)
+- Update the codebase with `ocamlformat.0.23.0` (@dinosaure, #66)
+- Update the project with `h2.0.9.0` (@dinosaure, #67)
+
 ### 0.0.9 (2022-04-11) Paris - France
 
 - Fix unikernels (@hannesm, #58)
