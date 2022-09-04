@@ -6,14 +6,14 @@
 (executable
  (name simple_server)
  (modules simple_server)
- (libraries logs.fmt fmt.tty mirage-crypto-rng.unix
-   tcpip.stack-socket paf.mirage))
+ (libraries logs.fmt fmt.tty mirage-crypto-rng.unix tcpip.stack-socket
+   paf.mirage))
 
 (library
  (name simple_client)
  (modules simple_client)
- (libraries lwt.unix logs.fmt fmt.tty uri
-   mirage-crypto-rng.unix tcpip.stack-socket paf.mirage))
+ (libraries lwt.unix logs.fmt fmt.tty uri mirage-crypto-rng.unix
+   tcpip.stack-socket paf.mirage))
 
 (executable
  (name clients)
@@ -31,14 +31,14 @@
 (executable
  (name test_alpn)
  (modules test_alpn)
- (libraries fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
-   paf.alpn paf.mirage mirage-crypto-rng.unix))
+ (libraries fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket paf.alpn
+   paf.mirage mirage-crypto-rng.unix))
 
 (executable
  (name test_cohttp)
  (modules test_cohttp)
- (libraries fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
-   cohttp-lwt paf-cohttp paf.mirage mirage-crypto-rng.unix astring))
+ (libraries fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket cohttp-lwt
+   paf-cohttp paf.mirage mirage-crypto-rng.unix astring))
 
 (rule
  (alias runtest)

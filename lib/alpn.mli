@@ -142,10 +142,10 @@ val run :
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
   Mimic.flow ->
   (body, [> `Msg of string ]) result Lwt.t
-(** [run ?alpn ~error_handler ~response_handler edn req flow] tries
-    communitate to [edn] via [flow] with a certain protocol according to the
-    given [alpn] value and the given request. It returns the body of the request
-    to allow the user to write on it (and communicate then with the server).
+(** [run ?alpn ~error_handler ~response_handler edn req flow] tries communitate
+    to [edn] via [flow] with a certain protocol according to the given [alpn]
+    value and the given request. It returns the body of the request to allow the
+    user to write on it (and communicate then with the server).
 
     [run] does only the ALPN dispatch. It does not instantiate the connection
     and it does not try to upgrade the protocol. It just choose the right HTTP
@@ -163,6 +163,5 @@ val run :
         Mimic.resolve ctx >>= function
         | Error _ as err -> Lwt.return err
         | Ok flow ->
-            run
-              ?alpn:None ~error_handler ~response_handler uri request flow
+            run ?alpn:None ~error_handler ~response_handler uri request flow
     ]} *)

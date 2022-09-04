@@ -169,8 +169,8 @@ let run uri =
    * However, if we want to test an {i alpn} service, we must refactorize the code
    * above to automatically add [paf_transmission] as a proceeded information into
    * the [ctx] after a [Mimic.unfold]. *)
-  Paf_mirage.run ~ctx ~error_handler:(error_handler wk_err)
-    ~response_handler (`V1 request)
+  Paf_mirage.run ~ctx ~error_handler:(error_handler wk_err) ~response_handler
+    (`V1 request)
   >>= function
   | Error err ->
       Log.err (fun m -> m "Got an error: %a." Mimic.pp_error err) ;

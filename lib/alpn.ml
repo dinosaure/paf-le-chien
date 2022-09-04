@@ -119,8 +119,7 @@ let run ?alpn ~error_handler ~response_handler edn request flow =
       let body =
         H2.Client_connection.request conn request ~error_handler
           ~response_handler in
-      Lwt.async (fun () ->
-          Paf.run (module H2.Client_connection) conn flow) ;
+      Lwt.async (fun () -> Paf.run (module H2.Client_connection) conn flow) ;
       Lwt.return_ok (Body_HTTP_2_0 (Wr, Wr body))
   | (Some "http/1.1" | None), `V1 request ->
       let error_handler = error_handler_v1 edn error_handler in
@@ -128,8 +127,7 @@ let run ?alpn ~error_handler ~response_handler edn request flow =
       let body, conn =
         Httpaf.Client_connection.request request ~error_handler
           ~response_handler in
-      Lwt.async (fun () ->
-          Paf.run (module Httpaf_Client_connection) conn flow) ;
+      Lwt.async (fun () -> Paf.run (module Httpaf_Client_connection) conn flow) ;
       Lwt.return_ok (Body_HTTP_1_1 (Wr, body))
   | Some protocol, _ ->
       Lwt.return_error

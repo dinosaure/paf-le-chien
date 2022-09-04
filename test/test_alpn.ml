@@ -104,14 +104,11 @@ let client ~ctx ~response_handler req =
         match P.TLS.epoch v with
         | Ok { Tls.Core.alpn_protocol; _ } -> alpn_protocol
         | Error _ -> None in
-      Alpn.run ?alpn ~error_handler ~response_handler ()
-        req flow
-      >>= function
+      Alpn.run ?alpn ~error_handler ~response_handler () req flow >>= function
       | Ok body -> Lwt.return body
       | Error err -> Alcotest.failf "%a" Mimic.pp_error err)
   | Ok flow -> (
-      Alpn.run ~error_handler ~response_handler () req flow
-      >>= function
+      Alpn.run ~error_handler ~response_handler () req flow >>= function
       | Ok body -> Lwt.return body
       | Error err -> Alcotest.failf "%a" Mimic.pp_error err)
 

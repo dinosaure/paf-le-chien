@@ -76,7 +76,4 @@ val service :
   't service
 
 val serve :
-  ?stop:Lwt_switch.t ->
-  't service ->
-  't ->
-  [ `Initialized of unit Lwt.t ]
+  ?stop:Lwt_switch.t -> 't service -> 't -> [ `Initialized of unit Lwt.t ]

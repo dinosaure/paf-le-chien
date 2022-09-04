@@ -153,8 +153,7 @@ let call ?(ctx = default_ctx) ?headers
       let httpaf_body, conn =
         Httpaf.Client_connection.request ~config ~error_handler
           ~response_handler req in
-      Lwt.async (fun () ->
-          Paf.run (module Httpaf_Client_connection) conn flow) ;
+      Lwt.async (fun () -> Paf.run (module Httpaf_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
       Log.debug (fun m -> m "Body transmitted.") ;
       Lwt.pick
