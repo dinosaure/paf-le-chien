@@ -25,7 +25,7 @@ let () = Sys.set_signal sigpipe Sys.Signal_ignore
 let src = Logs.Src.create "simple-server"
 
 module Log = (val Logs.src_log src : Logs.LOG)
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
+module P = Paf_mirage.Make (Tcpip_stack_socket.V4V6.TCP)
 module Ke = Ke.Rke
 
 let getline queue =

@@ -6,13 +6,13 @@
 (executable
  (name simple_server)
  (modules simple_server)
- (libraries mirage-time-unix logs.fmt fmt.tty mirage-crypto-rng.unix
+ (libraries logs.fmt fmt.tty mirage-crypto-rng.unix
    tcpip.stack-socket paf.mirage))
 
 (library
  (name simple_client)
  (modules simple_client)
- (libraries mirage-time-unix lwt.unix logs.fmt fmt.tty uri
+ (libraries lwt.unix logs.fmt fmt.tty uri
    mirage-crypto-rng.unix tcpip.stack-socket paf.mirage))
 
 (executable
@@ -31,13 +31,13 @@
 (executable
  (name test_alpn)
  (modules test_alpn)
- (libraries mirage-time-unix fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
+ (libraries fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
    paf.alpn paf.mirage mirage-crypto-rng.unix))
 
 (executable
  (name test_cohttp)
  (modules test_cohttp)
- (libraries mirage-time-unix fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
+ (libraries fmt.tty logs.fmt alcotest-lwt tcpip.stack-socket
    cohttp-lwt paf-cohttp paf.mirage mirage-crypto-rng.unix astring))
 
 (rule

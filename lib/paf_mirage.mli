@@ -125,7 +125,7 @@ module type S = sig
       [service]. [stop] can be used to stop the service. *)
 end
 
-module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
+module Make (Stack : Tcpip.Tcp.S) :
   S
     with type stack = Stack.t
      and type TCP.flow = Stack.flow
@@ -144,7 +144,6 @@ type transmission = [ `Clear | `TLS of string option ]
 val paf_transmission : transmission Mimic.value
 
 val run :
-  sleep:Paf.sleep ->
   ctx:Mimic.ctx ->
   error_handler:(Mimic.flow -> Alpn.client_error -> unit) ->
   response_handler:(Mimic.flow -> Alpn.response -> Alpn.body -> unit) ->

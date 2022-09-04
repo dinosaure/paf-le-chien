@@ -58,7 +58,7 @@ module type S = sig
     ?stop:Lwt_switch.t -> 't Paf.service -> 't -> [ `Initialized of unit Lwt.t ]
 end
 
-module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
+module Make (Stack : Tcpip.Tcp.S) :
   S
     with type stack = Stack.t
      and type TCP.flow = Stack.flow
@@ -243,7 +243,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
           Lwt.return_error (err :> [ TLS.write_error | `Msg of string ]) in
     Alpn.service alpn ~error_handler ~request_handler handshake accept close
 
-  let serve ?stop service t = Paf.serve ~sleep:Time.sleep_ns ?stop service t
+  let serve ?stop service t = Paf.serve ?stop service t
 end
 
 type transmission = [ `Clear | `TLS of string option ]
@@ -262,16 +262,16 @@ let rec kind_of_flow : Mimic.edn list -> transmission option = function
 
 let ( >>? ) = Lwt_result.bind
 
-let run ~sleep ~ctx ~error_handler ~response_handler request =
+let run ~ctx ~error_handler ~response_handler request =
   Mimic.unfold ctx >>? fun ress ->
   Mimic.connect ress >>= fun res ->
   match (res, kind_of_flow ress) with
   | (Error _ as err), _ -> Lwt.return err
   | Ok flow, (Some `Clear | None) ->
       let alpn = match request with `V1 _ -> "http/1.1" | `V2 _ -> "h2c" in
-      Alpn.run ~sleep ~alpn ~error_handler ~response_handler flow request flow
+      Alpn.run ~alpn ~error_handler ~response_handler flow request flow
   | Ok flow, Some (`TLS alpn) ->
-      Alpn.run ~sleep ?alpn ~error_handler ~response_handler flow request flow
+      Alpn.run ?alpn ~error_handler ~response_handler flow request flow
 
 module TCPV4V6 (Stack : Tcpip.Stack.V4V6) : sig
   include

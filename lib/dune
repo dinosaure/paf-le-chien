@@ -14,7 +14,7 @@
  (name paf_mirage)
  (public_name paf.mirage)
  (modules paf_mirage)
- (libraries tcpip paf tls-mirage mirage-time paf.alpn))
+ (libraries tcpip paf tls-mirage paf.alpn))
 
 (library
  (name paf_cohttp)

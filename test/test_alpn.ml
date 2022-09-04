@@ -22,7 +22,7 @@ let () = Logs.set_reporter (reporter Fmt.stderr)
 let () = Logs.set_level ~all:true (Some Logs.Debug)
 let () = Mirage_crypto_rng_unix.initialize ()
 
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
+module P = Paf_mirage.Make (Tcpip_stack_socket.V4V6.TCP)
 
 let unix_stack () =
   Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
@@ -104,13 +104,13 @@ let client ~ctx ~response_handler req =
         match P.TLS.epoch v with
         | Ok { Tls.Core.alpn_protocol; _ } -> alpn_protocol
         | Error _ -> None in
-      Alpn.run ~sleep:Time.sleep_ns ?alpn ~error_handler ~response_handler ()
+      Alpn.run ?alpn ~error_handler ~response_handler ()
         req flow
       >>= function
       | Ok body -> Lwt.return body
       | Error err -> Alcotest.failf "%a" Mimic.pp_error err)
   | Ok flow -> (
-      Alpn.run ~sleep:Time.sleep_ns ~error_handler ~response_handler () req flow
+      Alpn.run ~error_handler ~response_handler () req flow
       >>= function
       | Ok body -> Lwt.return body
       | Error err -> Alcotest.failf "%a" Mimic.pp_error err)

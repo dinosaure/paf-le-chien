@@ -82,7 +82,7 @@ let run =
   | Ok flow ->
     let body, conn = Httpaf.Client_connection.request ?config:None req
       ~error_handler ~response_handler in
-    Paf.run (module Httpaf.Client_connection) ~sleep conn flow >>= fun () ->
+    Paf.run (module Httpaf.Client_connection) conn flow >>= fun () ->
     Lwt.return_ok body
 ```
 
@@ -169,9 +169,8 @@ let fiber =
   let t = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Lwt_unix.bind t (Unix.ADDR_INET (Unix.inet_addr_loopback, 8080))
   >>= fun () ->
-  let `Initialized th = Paf.serve
-    ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
-    service t in th
+  let `Initialized th = Paf.serve service t in
+  th
 
 let () = Lwt_main.run fiber
 ```

@@ -60,7 +60,6 @@ module type RUNTIME = sig
   val shutdown : t -> unit
 end
 
-type sleep = int64 -> unit Lwt.t
 type 'conn runtime = (module RUNTIME with type t = 'conn)
 
 module Make (Flow : Mirage_flow.S) = struct
@@ -70,15 +69,14 @@ module Make (Flow : Mirage_flow.S) = struct
 
   type flow = {
     flow : Flow.flow;
-    sleep : sleep;
     queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t;
     mutable rd_closed : bool;
     mutable wr_closed : bool;
   }
 
-  let create ~sleep flow =
+  let create flow =
     let queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
-    Lwt.return { flow; sleep; queue; rd_closed = false; wr_closed = false }
+    Lwt.return { flow; queue; rd_closed = false; wr_closed = false }
 
   let safely_close flow =
     if flow.rd_closed && flow.wr_closed
@@ -140,15 +138,12 @@ module Make (Flow : Mirage_flow.S) = struct
    * In others words, [compress] seems the key to ensure that we deliver something
    * good for HTTP/AF to terminate or not the connection properly. *)
 
-  let sleep flow timeout =
-    flow.sleep timeout >>= fun () -> Lwt.return (Error `Closed)
-
-  let writev ?(timeout = 5_000_000_000L) flow iovecs =
+  let writev flow iovecs =
     let rec go acc = function
       | [] -> Lwt.return (`Ok acc)
       | { Faraday.buffer; off; len } :: rest -> (
           let raw = Cstruct.of_bigarray buffer ~off ~len in
-          Lwt.pick [ Flow.write flow.flow raw; sleep flow timeout ] >>= function
+          Flow.write flow.flow raw >>= function
           | Ok () -> go (acc + len) rest
           | Error `Closed ->
               flow.wr_closed <- true ;
@@ -171,7 +166,7 @@ module Make (Flow : Mirage_flow.S) = struct
 end
 
 module Server (Flow : Mirage_flow.S) (Runtime : RUNTIME) : sig
-  val server : sleep:sleep -> Runtime.t -> Flow.flow -> unit Lwt.t
+  val server : Runtime.t -> Flow.flow -> unit Lwt.t
 end = struct
   let src = Logs.Src.create "paf-server"
 
@@ -179,8 +174,8 @@ end = struct
   module Easy_flow = Make (Flow)
   open Lwt.Infix
 
-  let server ~sleep connection flow =
-    Easy_flow.create ~sleep flow >>= fun flow ->
+  let server connection flow =
+    Easy_flow.create flow >>= fun flow ->
     let rd_exit, notify_rd_exit = Lwt.wait () in
     let wr_exit, notify_wr_exit = Lwt.wait () in
     let rec rd_fiber () =
@@ -234,7 +229,7 @@ end = struct
 end
 
 module Client (Flow : Mirage_flow.S) (Runtime : RUNTIME) : sig
-  val run : sleep:sleep -> Runtime.t -> Flow.flow -> unit Lwt.t
+  val run : Runtime.t -> Flow.flow -> unit Lwt.t
 end = struct
   open Lwt.Infix
 
@@ -243,8 +238,8 @@ end = struct
   module Log = (val Logs.src_log src : Logs.LOG)
   module Easy_flow = Make (Flow)
 
-  let run ~sleep connection flow =
-    Easy_flow.create ~sleep flow >>= fun flow ->
+  let run connection flow =
+    Easy_flow.create flow >>= fun flow ->
     let rd_exit, notify_rd_exit = Lwt.wait () in
     let wr_exit, notify_wr_exit = Lwt.wait () in
 
@@ -356,20 +351,20 @@ let serve_when_ready :
        | Error _ as err -> close t >>= fun () -> Lwt.return err in
      stop_result >>= function Ok () | Error `Closed -> Lwt.return_unit)
 
-let server : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
- fun (module Runtime) ~sleep conn flow ->
+let server : type t. t runtime -> t -> Mimic.flow -> unit Lwt.t =
+ fun (module Runtime) conn flow ->
   let module Server = Server (Mimic) (Runtime) in
-  Server.server ~sleep conn flow
+  Server.server conn flow
 
-let serve ~sleep ?stop service t =
+let serve ?stop service t =
   let (Service { accept; handshake; connection; close }) = service in
   let handler flow =
     connection flow >>= function
-    | Ok (flow, Runtime (runtime, conn)) -> server runtime ~sleep conn flow
+    | Ok (flow, Runtime (runtime, conn)) -> server runtime conn flow
     | Error _ -> Lwt.return_unit in
   serve_when_ready ?stop ~handler { accept; handshake; close } t
 
-let run : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
- fun (module Runtime) ~sleep conn flow ->
+let run : type t. t runtime -> t -> Mimic.flow -> unit Lwt.t =
+ fun (module Runtime) conn flow ->
   let module Client = Client (Mimic) (Runtime) in
-  Client.run ~sleep conn flow
+  Client.run conn flow

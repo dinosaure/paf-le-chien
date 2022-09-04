@@ -122,7 +122,6 @@ val service :
         Lwt_unix.bind t (Unix.ADDR_INET (Unix.inet_addr_loopback, 8080))
         >>= fun () ->
         let `Initialized th = Paf.serve
-          ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
           service t in th
 
       let () = Lwt_main.run fiber
@@ -136,7 +135,6 @@ type client_error =
   | `Protocol_error of H2.Error_code.t * string ]
 
 val run :
-  sleep:Paf.sleep ->
   ?alpn:string ->
   error_handler:('edn -> client_error -> unit) ->
   response_handler:('edn -> response -> body -> unit) ->
@@ -144,7 +142,7 @@ val run :
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
   Mimic.flow ->
   (body, [> `Msg of string ]) result Lwt.t
-(** [run ~sleep ?alpn ~error_handler ~response_handler edn req flow] tries
+(** [run ?alpn ~error_handler ~response_handler edn req flow] tries
     communitate to [edn] via [flow] with a certain protocol according to the
     given [alpn] value and the given request. It returns the body of the request
     to allow the user to write on it (and communicate then with the server).
@@ -166,6 +164,5 @@ val run :
         | Error _ as err -> Lwt.return err
         | Ok flow ->
             run
-              ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
               ?alpn:None ~error_handler ~response_handler uri request flow
     ]} *)

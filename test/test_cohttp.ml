@@ -21,7 +21,7 @@ let () = Logs.set_reporter (reporter Fmt.stderr)
 let () = Logs.set_level ~all:true (Some Logs.Debug)
 let () = Mirage_crypto_rng_unix.initialize ()
 
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
+module P = Paf_mirage.Make (Tcpip_stack_socket.V4V6.TCP)
 
 let unix_stack () =
   Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
@@ -50,8 +50,6 @@ let tls =
   | Ok certs, Ok (`RSA key) ->
       Tls.Config.server ~certificates:(`Single (certs, `RSA key)) ()
   | _ -> invalid_arg "Invalid certificate or key"
-
-let sleep = Lwt_unix.sleep <.> Int64.to_float
 
 let run_http_and_https_server ~request_handler stop =
   unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun stack ->

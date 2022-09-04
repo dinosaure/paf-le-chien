@@ -24,7 +24,7 @@ let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
 let src = Logs.Src.create "simple-client"
 
 module Log = (val Logs.src_log src : Logs.LOG)
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
+module P = Paf_mirage.Make (Tcpip_stack_socket.V4V6.TCP)
 open Lwt.Infix
 
 let ( >>? ) x f =
@@ -125,8 +125,6 @@ let ctx =
          ~k:tls_connect)
   |> Mimic.(fold ipaddr Fun.[ req domain_name ] ~k:dns_resolve)
 
-let sleep v = Lwt_unix.sleep (Int64.to_float v)
-
 let run uri =
   let th, wk = Lwt.wait () in
   let f _ body =
@@ -171,7 +169,7 @@ let run uri =
    * However, if we want to test an {i alpn} service, we must refactorize the code
    * above to automatically add [paf_transmission] as a proceeded information into
    * the [ctx] after a [Mimic.unfold]. *)
-  Paf_mirage.run ~sleep ~ctx ~error_handler:(error_handler wk_err)
+  Paf_mirage.run ~ctx ~error_handler:(error_handler wk_err)
     ~response_handler (`V1 request)
   >>= function
   | Error err ->

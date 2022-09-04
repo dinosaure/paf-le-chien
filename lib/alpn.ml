@@ -108,7 +108,7 @@ let error_handler_v2 edn f = function
   | `Invalid_response_body_length resp ->
       f edn (`Invalid_response_body_length_v2 resp)
 
-let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
+let run ?alpn ~error_handler ~response_handler edn request flow =
   match (alpn, request) with
   | (Some "h2" | None), `V2 request ->
       let error_handler = error_handler_v2 edn error_handler in
@@ -120,7 +120,7 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
         H2.Client_connection.request conn request ~error_handler
           ~response_handler in
       Lwt.async (fun () ->
-          Paf.run (module H2.Client_connection) ~sleep conn flow) ;
+          Paf.run (module H2.Client_connection) conn flow) ;
       Lwt.return_ok (Body_HTTP_2_0 (Wr, Wr body))
   | (Some "http/1.1" | None), `V1 request ->
       let error_handler = error_handler_v1 edn error_handler in
@@ -129,7 +129,7 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
         Httpaf.Client_connection.request request ~error_handler
           ~response_handler in
       Lwt.async (fun () ->
-          Paf.run (module Httpaf_Client_connection) ~sleep conn flow) ;
+          Paf.run (module Httpaf_Client_connection) conn flow) ;
       Lwt.return_ok (Body_HTTP_1_1 (Wr, body))
   | Some protocol, _ ->
       Lwt.return_error
