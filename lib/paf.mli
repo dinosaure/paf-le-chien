@@ -64,6 +64,9 @@ type 'conn runtime = (module RUNTIME with type t = 'conn)
 type impl = Runtime : 'conn runtime * 'conn -> impl
 type sleep = int64 -> unit Lwt.t
 
+exception Flow of string
+exception Flow_write of string
+
 val server : 'conn runtime -> sleep:sleep -> 'conn -> Mimic.flow -> unit Lwt.t
 val run : 'conn runtime -> sleep:sleep -> 'conn -> Mimic.flow -> unit Lwt.t
 
