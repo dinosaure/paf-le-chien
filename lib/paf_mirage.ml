@@ -48,6 +48,7 @@ module type S = sig
     error_handler:
       (dst ->
       ?request:Alpn.request ->
+      [ `HTTP_1_1 | `HTTP_2_0 ] ->
       Alpn.server_error ->
       (Alpn.headers -> Alpn.body) ->
       unit) ->

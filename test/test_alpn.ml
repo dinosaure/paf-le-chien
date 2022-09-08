@@ -52,7 +52,7 @@ let tls =
         ()
   | _ -> invalid_arg "Invalid certificate or key"
 
-let error_handler _edn ?request:_ _err _respond = ()
+let error_handler _edn ?request:_ _version _err _respond = ()
 
 let alpn_of_tls_connection (_, flow) =
   match P.TLS.epoch flow with

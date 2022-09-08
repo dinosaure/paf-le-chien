@@ -68,7 +68,12 @@ type ('flow, 'edn) info = {
 val service :
   ('flow, 'edn) info ->
   error_handler:
-    ('edn -> ?request:request -> server_error -> (headers -> body) -> unit) ->
+    ('edn ->
+    ?request:request ->
+    [ `HTTP_1_1 | `HTTP_2_0 ] ->
+    server_error ->
+    (headers -> body) ->
+    unit) ->
   request_handler:('edn -> reqd -> unit) ->
   ('socket -> ('flow, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> ('socket, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->

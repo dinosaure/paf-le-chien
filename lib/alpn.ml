@@ -55,7 +55,7 @@ let error_handler_v1 edn f ?request error
   let response = function
     | Headers_HTTP_1_1 headers -> Body_HTTP_1_1 (Wr, response headers)
     | _ -> assert false in
-  f edn ?request (error :> server_error) response
+  f edn ?request `HTTP_1_1 (error :> server_error) response
 
 let error_handler_v2 edn f ?request error
     (response : H2.Headers.t -> H2.Body.Writer.t) =
@@ -63,7 +63,7 @@ let error_handler_v2 edn f ?request error
   let response = function
     | Headers_HTTP_2_0 headers -> Body_HTTP_2_0 (Wr, Wr (response headers))
     | _ -> assert false in
-  f edn ?request (error :> server_error) response
+  f edn ?request `HTTP_2_0 (error :> server_error) response
 
 let service info ~error_handler ~request_handler connect accept close =
   let connection flow =
