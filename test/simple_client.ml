@@ -32,9 +32,10 @@ let ( >>? ) x f =
 
 let ( <.> ) f g x = f (g x)
 
-let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
-    Alpn.response -> Alpn.body -> unit =
- fun resp body ->
+let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) :
+    Mimic.flow -> (Ipaddr.t * int) option -> Alpn.response -> Alpn.body -> unit
+    =
+ fun _flow _edn resp body ->
   match (resp, body) with
   | Alpn.Response_HTTP_2_0 _, _ -> failf "Invalid protocol H2"
   | Alpn.Response_HTTP_1_1 response, Alpn.Body_HTTP_1_1 (Alpn.Rd, body) -> (

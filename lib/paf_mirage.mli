@@ -113,7 +113,7 @@ module type S = sig
       Alpn.server_error ->
       (Alpn.headers -> Alpn.body) ->
       unit) ->
-    (dst -> Alpn.reqd -> unit) ->
+    (TLS.flow -> dst -> Alpn.reqd -> unit) ->
     t Paf.service
   (** [alpn_service ~tls ~error_handler request_handler] makes an H2/HTTP/AF
       service over TLS (from the given TLS configuration). An HTTP request
@@ -148,7 +148,12 @@ val run :
   sleep:Paf.sleep ->
   ctx:Mimic.ctx ->
   error_handler:(Mimic.flow -> Alpn.client_error -> unit) ->
-  response_handler:(Mimic.flow -> Alpn.response -> Alpn.body -> unit) ->
+  response_handler:
+    (Mimic.flow ->
+    (Ipaddr.t * int) option ->
+    Alpn.response ->
+    Alpn.body ->
+    unit) ->
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
   (Alpn.body, [> Mimic.error ]) result Lwt.t
 (** [run ~ctx ~error_handler ~response_handler req] sends an HTTP request (H2 or

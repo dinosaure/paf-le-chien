@@ -74,7 +74,7 @@ val service :
     server_error ->
     (headers -> body) ->
     unit) ->
-  request_handler:('edn -> reqd -> unit) ->
+  request_handler:(Mimic.flow -> 'edn -> reqd -> unit) ->
   ('socket -> ('flow, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> ('socket, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
@@ -143,8 +143,8 @@ type client_error =
 val run :
   sleep:Paf.sleep ->
   ?alpn:string ->
-  error_handler:('edn -> client_error -> unit) ->
-  response_handler:('edn -> response -> body -> unit) ->
+  error_handler:(Mimic.flow -> client_error -> unit) ->
+  response_handler:(Mimic.flow -> 'edn -> response -> body -> unit) ->
   'edn ->
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
   Mimic.flow ->

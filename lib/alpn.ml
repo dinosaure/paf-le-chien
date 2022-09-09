@@ -22,14 +22,14 @@ type headers =
   | Headers_HTTP_1_1 of Httpaf.Headers.t
   | Headers_HTTP_2_0 of H2.Headers.t
 
-let response_handler_v1_1 capability edn f resp body =
-  f edn (Response_HTTP_1_1 resp) (Body_HTTP_1_1 (capability, body))
+let response_handler_v1_1 capability flow edn f resp body =
+  f flow edn (Response_HTTP_1_1 resp) (Body_HTTP_1_1 (capability, body))
 
-let response_handler_v2_0 capability edn f resp body =
-  f edn (Response_HTTP_2_0 resp) (Body_HTTP_2_0 (capability, Rd body))
+let response_handler_v2_0 capability flow edn f resp body =
+  f flow edn (Response_HTTP_2_0 resp) (Body_HTTP_2_0 (capability, Rd body))
 
-let request_handler_v1 edn f reqd = f edn (Reqd_HTTP_1_1 reqd)
-let request_handler_v2 edn f reqd = f edn (Reqd_HTTP_2_0 reqd)
+let request_handler_v1 flow edn f reqd = f flow edn (Reqd_HTTP_1_1 reqd)
+let request_handler_v2 flow edn f reqd = f flow edn (Reqd_HTTP_2_0 reqd)
 
 module Httpaf_Client_connection = struct
   include Httpaf.Client_connection
@@ -72,7 +72,7 @@ let service info ~error_handler ~request_handler connect accept close =
         let edn = info.peer flow in
         let flow = info.injection flow in
         let error_handler = error_handler_v1 edn error_handler in
-        let request_handler = request_handler_v1 edn request_handler in
+        let request_handler = request_handler_v1 flow edn request_handler in
         let conn =
           Httpaf.Server_connection.create ~error_handler request_handler in
         Lwt.return_ok
@@ -81,7 +81,7 @@ let service info ~error_handler ~request_handler connect accept close =
         let edn = info.peer flow in
         let flow = info.injection flow in
         let error_handler = error_handler_v2 edn error_handler in
-        let request_handler = request_handler_v2 edn request_handler in
+        let request_handler = request_handler_v2 flow edn request_handler in
         let conn = H2.Server_connection.create ~error_handler request_handler in
         Lwt.return_ok (flow, Paf.Runtime ((module H2.Server_connection), conn))
     | Some protocol ->
@@ -97,22 +97,23 @@ type client_error =
 
 type common_error = [ `Exn of exn | `Malformed_response of string ]
 
-let error_handler_v1 edn f = function
-  | #common_error as err -> f edn err
+let error_handler_v1 flow f = function
+  | #common_error as err -> f flow err
   | `Invalid_response_body_length resp ->
-      f edn (`Invalid_response_body_length_v1 resp)
+      f flow (`Invalid_response_body_length_v1 resp)
 
-let error_handler_v2 edn f = function
-  | #common_error as err -> f edn err
-  | `Protocol_error _ as err -> f edn err
+let error_handler_v2 flow f = function
+  | #common_error as err -> f flow err
+  | `Protocol_error _ as err -> f flow err
   | `Invalid_response_body_length resp ->
-      f edn (`Invalid_response_body_length_v2 resp)
+      f flow (`Invalid_response_body_length_v2 resp)
 
 let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
   match (alpn, request) with
   | (Some "h2" | None), `V2 request ->
-      let error_handler = error_handler_v2 edn error_handler in
-      let response_handler = response_handler_v2_0 Rd edn response_handler in
+      let error_handler = error_handler_v2 flow error_handler in
+      let response_handler =
+        response_handler_v2_0 Rd flow edn response_handler in
       let conn =
         H2.Client_connection.create ?config:None ?push_handler:None
           ~error_handler in
@@ -123,8 +124,9 @@ let run ~sleep ?alpn ~error_handler ~response_handler edn request flow =
           Paf.run (module H2.Client_connection) ~sleep conn flow) ;
       Lwt.return_ok (Body_HTTP_2_0 (Wr, Wr body))
   | (Some "http/1.1" | None), `V1 request ->
-      let error_handler = error_handler_v1 edn error_handler in
-      let response_handler = response_handler_v1_1 Rd edn response_handler in
+      let error_handler = error_handler_v1 flow error_handler in
+      let response_handler =
+        response_handler_v1_1 Rd flow edn response_handler in
       let body, conn =
         Httpaf.Client_connection.request request ~error_handler
           ~response_handler in

@@ -58,6 +58,7 @@ module type RUNTIME = sig
       buffered output has been flushed, at which point it will return [`Close]. *)
 
   val shutdown : t -> unit
+  (** [shutdown t] asks to shutdown the connection. *)
 end
 
 type sleep = int64 -> unit Lwt.t
@@ -155,12 +156,18 @@ module Make (Flow : Mirage_flow.S) = struct
        2) [ocaml-h2] wants to keep the ownership on given [Faraday.iovec]s
 
        To protect one from the other, copying is necessary. *)
+    Log.debug (fun m ->
+        m "Start to write %d byte(s)."
+          (List.fold_left (fun acc cs -> Cstruct.length cs + acc) 0 iovecs)) ;
     Flow.writev flow.flow iovecs >>= function
     | Ok () ->
         Lwt.return
           (`Ok
             (List.fold_left (fun acc cs -> acc + Cstruct.length cs) 0 iovecs))
     | Error err ->
+        Log.err (fun m ->
+            m "Got an errror when we wrote something: %a." Flow.pp_write_error
+              err) ;
         report_error err ;
         flow.wr_closed <- true ;
         safely_close flow >>= fun () -> Lwt.return `Closed
@@ -216,7 +223,11 @@ end = struct
             Log.debug (fun m -> m "next read operation: `close") ;
             Lwt.wakeup_later notify_rd_exit () ;
             flow.Easy_flow.rd_closed <- true ;
-            Easy_flow.safely_close flow in
+            Easy_flow.safely_close flow >|= fun () ->
+            (* XXX(dinosaure): this addition is due to the fact that
+               [ocaml-h2] never closes the write loop (it emits [`Close]
+               only if we call [shutdown]). *)
+            Runtime.shutdown connection in
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
           Runtime.report_exn connection exn ;

@@ -52,7 +52,7 @@ module type S = sig
       Alpn.server_error ->
       (Alpn.headers -> Alpn.body) ->
       unit) ->
-    (dst -> Alpn.reqd -> unit) ->
+    (TLS.flow -> dst -> Alpn.reqd -> unit) ->
     t Paf.service
 
   val serve :
@@ -247,6 +247,14 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
           Log.err (fun m -> m "Got a TLS error: %a." TLS.pp_write_error err) ;
           Stack.close flow >>= fun () ->
           Lwt.return_error (err :> [ TLS.write_error | `Msg of string ]) in
+    let module R = (val Mimic.repr tls_protocol) in
+    let request_handler flow edn reqd =
+      match flow with
+      | R.T flow -> request_handler flow edn reqd
+      | _ -> assert false
+      (* XXX(dinosaure): this case should never occur. Indeed, the [injection]
+         given to [Alpn.service] only create a [tls_protocol] flow. We just
+         destruct it and give it to [request_handler]. *) in
     Alpn.service alpn ~error_handler ~request_handler handshake accept close
 
   let serve ?stop service t = Paf.serve ~sleep:Time.sleep_ns ?stop service t
@@ -257,6 +265,9 @@ type transmission = [ `Clear | `TLS of string option ]
 let paf_transmission : transmission Mimic.value =
   Mimic.make ~name:"paf-transmission"
 
+let paf_endpoint : (Ipaddr.t * int) Mimic.value =
+  Mimic.make ~name:"paf-endpoint"
+
 open Lwt.Infix
 
 let rec kind_of_flow : Mimic.edn list -> transmission option = function
@@ -264,6 +275,13 @@ let rec kind_of_flow : Mimic.edn list -> transmission option = function
       match Mimic.equal k paf_transmission with
       | Some Mimic.Refl -> Some v
       | None -> kind_of_flow r)
+  | [] -> None
+
+let rec endpoint_of_flow : Mimic.edn list -> (Ipaddr.t * int) option = function
+  | Mimic.Edn (k, v) :: r -> (
+      match Mimic.equal k paf_endpoint with
+      | Some Mimic.Refl -> Some v
+      | None -> endpoint_of_flow r)
   | [] -> None
 
 let ( >>? ) = Lwt_result.bind
@@ -274,10 +292,12 @@ let run ~sleep ~ctx ~error_handler ~response_handler request =
   match (res, kind_of_flow ress) with
   | (Error _ as err), _ -> Lwt.return err
   | Ok flow, (Some `Clear | None) ->
+      let edn = endpoint_of_flow ress in
       let alpn = match request with `V1 _ -> "http/1.1" | `V2 _ -> "h2c" in
-      Alpn.run ~sleep ~alpn ~error_handler ~response_handler flow request flow
+      Alpn.run ~sleep ~alpn ~error_handler ~response_handler edn request flow
   | Ok flow, Some (`TLS alpn) ->
-      Alpn.run ~sleep ?alpn ~error_handler ~response_handler flow request flow
+      let edn = endpoint_of_flow ress in
+      Alpn.run ~sleep ?alpn ~error_handler ~response_handler edn request flow
 
 module TCPV4V6 (Stack : Tcpip.Stack.V4V6) : sig
   include
