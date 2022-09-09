@@ -200,8 +200,11 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
           (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
            * that the bound socket is closed but the socket with the peer is
            * closed. *)
+          Log.err (fun m -> m "The connection was closed by peer.") ;
           Lwt.return_error (`Write `Closed)
-      | Error err -> Stack.close flow >>= fun () -> Lwt.return_error err in
+      | Error err ->
+          Log.err (fun m -> m "Got a TLS error: %a." TLS.pp_write_error err) ;
+          Stack.close flow >>= fun () -> Lwt.return_error err in
     let connection (dst, flow) =
       let error_handler = error_handler dst in
       let request_handler = request_handler flow dst in
@@ -238,8 +241,10 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
           (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
            * that the bound socket is closed but the socket with the peer is
            * closed. *)
+          Log.err (fun m -> m "The connection was closed by peer.") ;
           Lwt.return_error (`Write `Closed)
       | Error err ->
+          Log.err (fun m -> m "Got a TLS error: %a." TLS.pp_write_error err) ;
           Stack.close flow >>= fun () ->
           Lwt.return_error (err :> [ TLS.write_error | `Msg of string ]) in
     Alpn.service alpn ~error_handler ~request_handler handshake accept close
