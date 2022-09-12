@@ -84,7 +84,7 @@ let service ~request_handler () =
       Alpn.injection;
     } in
   let handshake flow =
-    let edn = Tcpip_stack_socket.V4V6.TCP.dst flow in
+    let edn = P.TCP.dst flow in
     P.TLS.server_of_flow tls flow >>= function
     | Ok flow -> Lwt.return_ok (edn, flow)
     | Error err ->

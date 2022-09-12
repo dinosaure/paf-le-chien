@@ -24,9 +24,16 @@ module type S = sig
     include Mirage_flow.S
 
     val dst : flow -> ipaddr * int
+    val no_close : flow -> unit
+    val to_close : flow -> unit
   end
 
-  module TLS : module type of Tls_mirage.Make (TCP)
+  module TLS : sig
+    include module type of Tls_mirage.Make (TCP)
+
+    val no_close : flow -> unit
+    val to_close : flow -> unit
+  end
 
   val tcp_protocol : (stack * ipaddr * int, TCP.flow) Mimic.protocol
   val tcp_edn : (stack * ipaddr * int) Mimic.value
@@ -127,10 +134,7 @@ module type S = sig
 end
 
 module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
-  S
-    with type stack = Stack.t
-     and type TCP.flow = Stack.flow
-     and type ipaddr = Stack.ipaddr
+  S with type stack = Stack.t and type ipaddr = Stack.ipaddr
 
 (** {2 Client implementation.}
 
