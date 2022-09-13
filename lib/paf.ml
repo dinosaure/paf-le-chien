@@ -332,7 +332,9 @@ end = struct
           Lwt.return ()) in
     wr_loop () ;
     rd_loop () ;
-    Lwt.join [ rd_exit; wr_exit ] >>= fun () -> Easy_flow.close flow
+    Lwt.join [ rd_exit; wr_exit ] >>= fun () ->
+    Log.debug (fun m -> m "End of transmission.") ;
+    Easy_flow.close flow
 end
 
 type impl = Runtime : 'conn runtime * 'conn -> impl
