@@ -29,10 +29,29 @@ module type S = sig
   end
 
   module TLS : sig
-    include module type of Tls_mirage.Make (TCP)
+    type error =
+      [ `Tls_alert of Tls.Packet.alert_type
+      | `Tls_failure of Tls.Engine.failure
+      | `Read of TCP.error
+      | `Write of TCP.write_error ]
+
+    type write_error = [ `Closed | error ]
+
+    include
+      Mirage_flow.S with type error := error and type write_error := write_error
 
     val no_close : flow -> unit
     val to_close : flow -> unit
+    val epoch : flow -> (Tls.Core.epoch_data, unit) result
+
+    val server_of_flow :
+      Tls.Config.server -> TCP.flow -> (flow, write_error) result Lwt.t
+
+    val client_of_flow :
+      Tls.Config.client ->
+      ?host:[ `host ] Domain_name.t ->
+      TCP.flow ->
+      (flow, write_error) result Lwt.t
   end
 
   val tcp_protocol : (stack * ipaddr * int, TCP.flow) Mimic.protocol

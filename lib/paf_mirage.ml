@@ -11,10 +11,29 @@ module type S = sig
   end
 
   module TLS : sig
-    include module type of Tls_mirage.Make (TCP)
+    type error =
+      [ `Tls_alert of Tls.Packet.alert_type
+      | `Tls_failure of Tls.Engine.failure
+      | `Read of TCP.error
+      | `Write of TCP.write_error ]
+
+    type write_error = [ `Closed | error ]
+
+    include
+      Mirage_flow.S with type error := error and type write_error := write_error
 
     val no_close : flow -> unit
     val to_close : flow -> unit
+    val epoch : flow -> (Tls.Core.epoch_data, unit) result
+
+    val server_of_flow :
+      Tls.Config.server -> TCP.flow -> (flow, write_error) result Lwt.t
+
+    val client_of_flow :
+      Tls.Config.client ->
+      ?host:[ `host ] Domain_name.t ->
+      TCP.flow ->
+      (flow, write_error) result Lwt.t
   end
 
   val tcp_protocol : (stack * ipaddr * int, TCP.flow) Mimic.protocol
@@ -133,19 +152,38 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
       * Stack.ipaddr
       * int
 
+    type nonrec flow = TCP.flow * flow
+
     let connect (host, cfg, stack, ipaddr, port) =
       Stack.create_connection stack (ipaddr, port) >>= function
       | Error err -> Lwt.return_error (`Read err)
-      | Ok flow -> client_of_flow cfg ?host { TCP.flow; TCP.no_close = false }
+      | Ok flow ->
+          let open Lwt_result.Infix in
+          let tcp_flow = { TCP.flow; TCP.no_close = false } in
+          client_of_flow cfg ?host tcp_flow >>= fun tls_flow ->
+          Lwt.return_ok (tcp_flow, tls_flow)
 
-    let no_close flow = TCP.no_close Obj.(obj (field (repr flow) 1))
-    let to_close flow = TCP.to_close Obj.(obj (field (repr flow) 1))
+    let no_close (tcp_flow, _) = TCP.no_close tcp_flow
+    let to_close (tcp_flow, _) = TCP.to_close tcp_flow
+    let read (_, tls_flow) = read tls_flow
+    let write (_, tls_flow) = write tls_flow
+    let writev (_, tls_flow) = writev tls_flow
+    let epoch (_, tls_flow) = epoch tls_flow
 
-    let close flow =
-      let tcp_flow : TCP.flow = Obj.(obj (field (repr flow) 1)) in
+    let server_of_flow config tcp_flow =
+      Lwt_result.Infix.(
+        server_of_flow config tcp_flow >>= fun tls_flow ->
+        Lwt.return_ok (tcp_flow, tls_flow))
+
+    let client_of_flow config ?host tcp_flow =
+      Lwt_result.Infix.(
+        client_of_flow config ?host tcp_flow >>= fun tls_flow ->
+        Lwt.return_ok (tcp_flow, tls_flow))
+
+    let close (tcp_flow, tls_flow) =
       match tcp_flow.TCP.no_close with
       | true -> Lwt.return_unit
-      | false -> close flow
+      | false -> close tls_flow
   end
 
   let src = Logs.Src.create "paf-layer"
@@ -221,9 +259,9 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
 
   let https_service ~tls ?config ~error_handler request_handler =
     let module R = (val Mimic.repr tls_protocol) in
-    let handshake flow =
-      let dst = TCP.dst flow in
-      TLS.server_of_flow tls flow >>= function
+    let handshake tcp_flow =
+      let dst = TCP.dst tcp_flow in
+      TLS.server_of_flow tls tcp_flow >>= function
       | Ok flow -> Lwt.return_ok (dst, flow)
       | Error `Closed ->
           (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
@@ -233,7 +271,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
           Lwt.return_error (`Write `Closed)
       | Error err ->
           Log.err (fun m -> m "Got a TLS error: %a." TLS.pp_write_error err) ;
-          TCP.close flow >>= fun () -> Lwt.return_error err in
+          TCP.close tcp_flow >>= fun () -> Lwt.return_error err in
     let connection (dst, flow) =
       let error_handler = error_handler dst in
       let request_handler = request_handler flow dst in
@@ -252,7 +290,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
       | Error _ -> None in
     let peer_of_tls_connection (edn, _flow) = edn in
     (* XXX(dinosaure): [TLS]/[ocaml-tls] should let us to project the underlying
-     * [flow] and apply [TCP.dst] on it. *)
+     * [flow] and apply [TCP.dst] on it.
+     * Actually, we did it with the [TLS] module. *)
     let injection (_edn, flow) = R.T flow in
     {
       Alpn.alpn = alpn_of_tls_connection;
@@ -262,9 +301,9 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
 
   let alpn_service ~tls ?config:(_ = (Httpaf.Config.default, H2.Config.default))
       ~error_handler request_handler =
-    let handshake flow =
-      let dst = TCP.dst flow in
-      TLS.server_of_flow tls flow >>= function
+    let handshake tcp_flow =
+      let dst = TCP.dst tcp_flow in
+      TLS.server_of_flow tls tcp_flow >>= function
       | Ok flow -> Lwt.return_ok (dst, flow)
       | Error `Closed ->
           (* XXX(dinosaure): be care! [`Closed] at this stage does not mean
@@ -274,7 +313,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
           Lwt.return_error (`Write `Closed)
       | Error err ->
           Log.err (fun m -> m "Got a TLS error: %a." TLS.pp_write_error err) ;
-          TCP.close flow >>= fun () ->
+          TCP.close tcp_flow >>= fun () ->
           Lwt.return_error (err :> [ TLS.write_error | `Msg of string ]) in
     let module R = (val Mimic.repr tls_protocol) in
     let request_handler flow edn reqd =
