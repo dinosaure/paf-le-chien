@@ -301,7 +301,8 @@ end = struct
             Log.debug (fun m -> m "next read operation: `close.") ;
             Lwt.wakeup_later notify_rd_exit () ;
             flow.Easy_flow.rd_closed <- true ;
-            Easy_flow.safely_close flow in
+            Easy_flow.safely_close flow >|= fun () ->
+            Runtime.shutdown connection in
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
           Runtime.report_exn connection exn ;
