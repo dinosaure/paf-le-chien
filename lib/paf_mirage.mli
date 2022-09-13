@@ -72,6 +72,7 @@ module type S = sig
   (** The type of the {i socket} bound on a specific port (via {!init}). *)
 
   type dst = ipaddr * int
+  type shutdown = unit -> unit
 
   val init : port:int -> stack -> t Lwt.t
   (** [init ~port stack] bounds the given [stack] to a specific port and return
@@ -101,7 +102,10 @@ module type S = sig
   val http_service :
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (TCP.flow -> dst -> Httpaf.Server_connection.request_handler) ->
+    (?shutdown:shutdown ->
+    TCP.flow ->
+    dst ->
+    Httpaf.Server_connection.request_handler) ->
     t Paf.service
   (** [http_service ~error_handler request_handler] makes an HTTP/AF service
       where any HTTP/1.1 requests are handled by [request_handler]. The returned
@@ -111,7 +115,10 @@ module type S = sig
     tls:Tls.Config.server ->
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (TLS.flow -> dst -> Httpaf.Server_connection.request_handler) ->
+    (?shutdown:shutdown ->
+    TLS.flow ->
+    dst ->
+    Httpaf.Server_connection.request_handler) ->
     t Paf.service
   (** [https_service ~tls ~error_handler request_handler] makes an HTTP/AF
       service over TLS (from the given TLS configuration). Then, HTTP/1.1
@@ -132,14 +139,7 @@ module type S = sig
   val alpn_service :
     tls:Tls.Config.server ->
     ?config:Httpaf.Config.t * H2.Config.t ->
-    error_handler:
-      (dst ->
-      ?request:Alpn.request ->
-      [ `HTTP_1_1 | `HTTP_2_0 ] ->
-      Alpn.server_error ->
-      (Alpn.headers -> Alpn.body) ->
-      unit) ->
-    (TLS.flow -> dst -> Alpn.reqd -> unit) ->
+    (TLS.flow, dst) Alpn.server_handler ->
     t Paf.service
   (** [alpn_service ~tls ~error_handler request_handler] makes an H2/HTTP/AF
       service over TLS (from the given TLS configuration). An HTTP request
@@ -168,15 +168,8 @@ type transmission = [ `Clear | `TLS of string option ]
 val paf_transmission : transmission Mimic.value
 
 val run :
-  sleep:Paf.sleep ->
   ctx:Mimic.ctx ->
-  error_handler:(Mimic.flow -> Alpn.client_error -> unit) ->
-  response_handler:
-    (Mimic.flow ->
-    (Ipaddr.t * int) option ->
-    Alpn.response ->
-    Alpn.body ->
-    unit) ->
+  (Ipaddr.t * int) option Alpn.client_handler ->
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
   (Alpn.body, [> Mimic.error ]) result Lwt.t
 (** [run ~ctx ~error_handler ~response_handler req] sends an HTTP request (H2 or

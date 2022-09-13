@@ -164,11 +164,6 @@ struct
   let call ?(ctx = Mimic.empty) ?(headers = Httpaf.Headers.empty)
       ?(body = `Empty) ?chunked (meth : [ `GET | `HEAD | `POST ]) uri =
     let ctx = with_uri uri ctx in
-    let sleep =
-      match Mimic.get sleep ctx with
-      | Some sleep -> sleep
-      | None -> fun _ -> Lwt.return_unit
-      (* TODO *) in
     let headers = with_host headers uri in
     let headers = with_transfer_encoding ~chunked meth body headers in
     let req =
@@ -189,7 +184,7 @@ struct
           Httpaf.Client_connection.request ~error_handler ~response_handler req
         in
         Lwt.async (fun () ->
-            Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
+            Paf.run (module Httpaf_Client_connection) conn flow) ;
         transmit body httpaf_body ;
         Lwt.pick
           [

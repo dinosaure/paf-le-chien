@@ -7,7 +7,6 @@ let scheme = Mimic.make ~name:"paf-scheme"
 let port = Mimic.make ~name:"paf-port"
 let domain_name = Mimic.make ~name:"paf-domain-name"
 let ipaddr = Mimic.make ~name:"paf-ipaddr"
-let sleep = Mimic.make ~name:"paf-sleep"
 
 type ctx = Mimic.ctx
 
@@ -129,11 +128,6 @@ let call ?(ctx = default_ctx) ?headers
     match Mimic.get httpaf_config ctx with
     | Some config -> config
     | None -> Httpaf.Config.default in
-  let sleep =
-    match Mimic.get sleep ctx with
-    | Some sleep -> sleep
-    | None -> fun _ -> Lwt.return_unit
-    (* TODO *) in
   let headers =
     match headers with
     | Some headers -> Httpaf.Headers.of_list (Cohttp.Header.to_list headers)
@@ -159,8 +153,7 @@ let call ?(ctx = default_ctx) ?headers
       let httpaf_body, conn =
         Httpaf.Client_connection.request ~config ~error_handler
           ~response_handler req in
-      Lwt.async (fun () ->
-          Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
+      Lwt.async (fun () -> Paf.run (module Httpaf_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
       Log.debug (fun m -> m "Body transmitted.") ;
       Lwt.pick

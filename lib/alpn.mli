@@ -11,29 +11,83 @@
     In other words, [Alpn] did the only choice to trust on [http/af] & [h2] to
     handle HTTP/1.0, HTTP/1.1 and H2 protocols. *)
 
-type 'c capability = Rd : [ `read ] capability | Wr : [ `write ] capability
+module type REQD = sig
+  type t
+  type request
+  type response
 
-type body =
-  | Body_HTTP_1_1 : 'c capability * 'c Httpaf.Body.t -> body
-  | Body_HTTP_2_0 : 'c capability * 'c h2_body -> body
+  module Body : sig
+    type ro
+    type wo
+  end
 
-and 'c h2_body =
-  | Wr : H2.Body.Writer.t -> [ `write ] h2_body
-  | Rd : H2.Body.Reader.t -> [ `read ] h2_body
+  val request : t -> request
+  val request_body : t -> Body.ro
+  val response : t -> response option
+  val response_exn : t -> response
+  val respond_with_string : t -> response -> string -> unit
+  val respond_with_bigstring : t -> response -> Bigstringaf.t -> unit
 
-type response =
-  | Response_HTTP_1_1 of Httpaf.Response.t
-  | Response_HTTP_2_0 of H2.Response.t
+  val respond_with_streaming :
+    t -> ?flush_headers_immediately:bool -> response -> Body.wo
 
-type request =
-  | Request_HTTP_1_1 of Httpaf.Request.t
-  | Request_HTTP_2_0 of H2.Request.t
+  val report_exn : t -> exn -> unit
+  val try_with : t -> (unit -> unit) -> (unit, exn) result
+end
 
-type reqd = Reqd_HTTP_1_1 of Httpaf.Reqd.t | Reqd_HTTP_2_0 of H2.Reqd.t
+type http_1_1_protocol =
+  (module REQD
+     with type t = Httpaf.Reqd.t
+      and type request = Httpaf.Request.t
+      and type response = Httpaf.Response.t
+      and type Body.ro = [ `read ] Httpaf.Body.t
+      and type Body.wo = [ `write ] Httpaf.Body.t)
 
-type headers =
-  | Headers_HTTP_1_1 of Httpaf.Headers.t
-  | Headers_HTTP_2_0 of H2.Headers.t
+type h2_protocol =
+  (module REQD
+     with type t = H2.Reqd.t
+      and type request = H2.Request.t
+      and type response = H2.Response.t
+      and type Body.ro = H2.Body.Reader.t
+      and type Body.wo = H2.Body.Writer.t)
+
+type ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol =
+  | HTTP_1_1 :
+      http_1_1_protocol
+      -> ( Httpaf.Reqd.t,
+           Httpaf.Headers.t,
+           Httpaf.Request.t,
+           Httpaf.Response.t,
+           [ `read ] Httpaf.Body.t,
+           [ `write ] Httpaf.Body.t )
+         protocol
+  | H2 :
+      h2_protocol
+      -> ( H2.Reqd.t,
+           H2.Headers.t,
+           H2.Request.t,
+           H2.Response.t,
+           H2.Body.Reader.t,
+           H2.Body.Writer.t )
+         protocol
+
+val http_1_1 :
+  ( Httpaf.Reqd.t,
+    Httpaf.Headers.t,
+    Httpaf.Request.t,
+    Httpaf.Response.t,
+    [ `read ] Httpaf.Body.t,
+    [ `write ] Httpaf.Body.t )
+  protocol
+
+val h2 :
+  ( H2.Reqd.t,
+    H2.Headers.t,
+    H2.Request.t,
+    H2.Response.t,
+    H2.Body.Reader.t,
+    H2.Body.Writer.t )
+  protocol
 
 type server_error =
   [ `Bad_gateway | `Bad_request | `Exn of exn | `Internal_server_error ]
@@ -65,16 +119,28 @@ type ('flow, 'edn) info = {
         R.T flow
     ]} *)
 
+type ('flow, 'edn) server_handler = {
+  error :
+    'reqd 'headers 'request 'response 'ro 'wo.
+    'edn ->
+    ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol ->
+    ?request:'request ->
+    server_error ->
+    ('headers -> 'wo) ->
+    unit;
+  request :
+    'reqd 'headers 'request 'response 'ro 'wo.
+    ?shutdown:(unit -> unit) ->
+    'flow ->
+    'edn ->
+    'reqd ->
+    ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol ->
+    unit;
+}
+
 val service :
   ('flow, 'edn) info ->
-  error_handler:
-    ('edn ->
-    ?request:request ->
-    [ `HTTP_1_1 | `HTTP_2_0 ] ->
-    server_error ->
-    (headers -> body) ->
-    unit) ->
-  request_handler:(Mimic.flow -> 'edn -> reqd -> unit) ->
+  (Mimic.flow, 'edn) server_handler ->
   ('socket -> ('flow, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> ('socket, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
@@ -126,9 +192,7 @@ val service :
         let t = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
         Lwt_unix.bind t (Unix.ADDR_INET (Unix.inet_addr_loopback, 8080))
         >>= fun () ->
-        let `Initialized th = Paf.serve
-          ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
-          service t in th
+        let `Initialized th = Paf.serve service t in th
 
       let () = Lwt_main.run fiber
     ]} *)
@@ -140,19 +204,39 @@ type client_error =
   | `Invalid_response_body_length_v2 of H2.Response.t
   | `Protocol_error of H2.Error_code.t * string ]
 
+type 'edn client_handler = {
+  error :
+    'reqd 'headers 'request 'response 'ro 'wo.
+    'edn ->
+    ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol ->
+    client_error ->
+    unit;
+  response :
+    'reqd 'headers 'request 'response 'ro 'wo.
+    ?shutdown:(unit -> unit) ->
+    Mimic.flow ->
+    'edn ->
+    'response ->
+    'ro ->
+    ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol ->
+    unit;
+}
+
+type body =
+  | Body_HTTP_1_1 : [ `write ] Httpaf.Body.t -> body
+  | Body_H2 : H2.Body.Writer.t -> body
+
 val run :
-  sleep:Paf.sleep ->
   ?alpn:string ->
-  error_handler:(Mimic.flow -> client_error -> unit) ->
-  response_handler:(Mimic.flow -> 'edn -> response -> body -> unit) ->
+  'edn client_handler ->
   'edn ->
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
   Mimic.flow ->
   (body, [> `Msg of string ]) result Lwt.t
-(** [run ~sleep ?alpn ~error_handler ~response_handler edn req flow] tries
-    communitate to [edn] via [flow] with a certain protocol according to the
-    given [alpn] value and the given request. It returns the body of the request
-    to allow the user to write on it (and communicate then with the server).
+(** [run ?alpn ~client_handler edn req flow] tries communicate to [edn] via
+    [flow] with a certain protocol according to the given [alpn] value and the
+    given request. It returns the body of the request to allow the user to write
+    on it (and communicate then with the server).
 
     [run] does only the ALPN dispatch. It does not instantiate the connection
     and it does not try to upgrade the protocol. It just choose the right HTTP
@@ -170,7 +254,5 @@ val run :
         Mimic.resolve ctx >>= function
         | Error _ as err -> Lwt.return err
         | Ok flow ->
-            run
-              ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
-              ?alpn:None ~error_handler ~response_handler uri request flow
+            run ?alpn:None ~error_handler ~response_handler uri request flow
     ]} *)

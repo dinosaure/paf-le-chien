@@ -61,7 +61,6 @@ module type RUNTIME = sig
   (** [shutdown t] asks to shutdown the connection. *)
 end
 
-type sleep = int64 -> unit Lwt.t
 type 'conn runtime = (module RUNTIME with type t = 'conn)
 
 exception Flow of string
@@ -74,15 +73,14 @@ module Make (Flow : Mirage_flow.S) = struct
 
   type flow = {
     flow : Flow.flow;
-    sleep : sleep;
     queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t;
     mutable rd_closed : bool;
     mutable wr_closed : bool;
   }
 
-  let create ~sleep flow =
+  let create flow =
     let queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
-    Lwt.return { flow; sleep; queue; rd_closed = false; wr_closed = false }
+    Lwt.return { flow; queue; rd_closed = false; wr_closed = false }
 
   let safely_close flow =
     if flow.rd_closed && flow.wr_closed
@@ -97,10 +95,12 @@ module Make (Flow : Mirage_flow.S) = struct
 
   open Lwt.Infix
 
-  let recv flow ~report_error ~read ~read_eof =
+  type eof = [ `Eof ]
+
+  let recv flow ~report_error ~report_closed ~read ~read_eof =
     Ke.Rke.compress flow.queue ;
     Flow.read flow.flow >>= function
-    | (Error _ | Ok `Eof) as v ->
+    | (Error _ | Ok #eof) as v ->
         flow.rd_closed <- true ;
         safely_close flow >>= fun () ->
         let _shift =
@@ -113,10 +113,7 @@ module Make (Flow : Mirage_flow.S) = struct
           | _ -> assert false
           (* XXX(dinosaure): impossible due to [compress]. *) in
         (match v with
-        | Ok _ ->
-            ()
-            (* TODO(dinosaure): @ansiwen report an error in this case for
-               [ocaml-h2]. *)
+        | Ok `Eof -> report_closed ()
         | Error err -> report_error err) ;
         Lwt.return `Closed
     | Ok (`Data v) ->
@@ -126,22 +123,6 @@ module Make (Flow : Mirage_flow.S) = struct
         let shift = read slice ~off:0 ~len:(Bigstringaf.length slice) in
         Ke.Rke.N.shift_exn flow.queue shift ;
         Lwt.return `Continue
-  (* XXX(dinosaure): semantically, this is the closer impl. of [recv] if we
-   * compare with HTTP/AF. [compress] is called before any [read] and it ensures
-   * some assumptions needed by HTTP/AF (or Angstrom) to parse requests.
-   *
-   * Indeed, without [compress] at the beginning, it seems that HTTP/AF is not
-   * able to decide to close the connection.
-   *
-   * On the other side, introspect [flow.queue] before and gives slices and limit
-   * calls to [read] can finish to a situation with ["\r\n"] into the queue and
-   * HTTP/AF is not able to shift nor to finalize.
-   *
-   * In others words, [compress] seems the key to ensure that we deliver something
-   * good for HTTP/AF to terminate or not the connection properly. *)
-
-  let _sleep flow timeout =
-    flow.sleep timeout >>= fun () -> Lwt.return (Error `Closed)
 
   let writev ~report_error flow iovecs =
     let iovecs =
@@ -187,7 +168,7 @@ module Make (Flow : Mirage_flow.S) = struct
 end
 
 module Server (Flow : Mirage_flow.S) (Runtime : RUNTIME) : sig
-  val server : sleep:sleep -> Runtime.t -> Flow.flow -> unit Lwt.t
+  val server : Runtime.t -> Flow.flow -> unit Lwt.t
 end = struct
   let src = Logs.Src.create "paf-server"
 
@@ -200,8 +181,8 @@ end = struct
   let to_flow_write_exception err : exn =
     Flow_write (Fmt.str "%a" Flow.pp_write_error err)
 
-  let server ~sleep connection flow =
-    Easy_flow.create ~sleep flow >>= fun flow ->
+  let server connection flow =
+    Easy_flow.create flow >>= fun flow ->
     let rd_exit, notify_rd_exit = Lwt.wait () in
     let wr_exit, notify_wr_exit = Lwt.wait () in
 
@@ -209,25 +190,23 @@ end = struct
       let report_error err =
         Runtime.report_exn connection (to_flow_exception err) in
       let rec go () =
+        Log.debug (fun m -> m "Compute next read operation.") ;
         match Runtime.next_read_operation connection with
         | `Read ->
             Log.debug (fun m -> m "next read operation: `read") ;
-            Easy_flow.recv flow ~report_error ~read:(Runtime.read connection)
+            Easy_flow.recv flow ~report_error ~report_closed:ignore
+              ~read:(Runtime.read connection)
               ~read_eof:(Runtime.read_eof connection)
             >>= fun _ -> go ()
         | `Yield ->
             Log.debug (fun m -> m "next read operation: `yield") ;
             Runtime.yield_reader connection rd_fiber ;
-            Lwt.return_unit
+            Lwt.pause ()
         | `Close ->
             Log.debug (fun m -> m "next read operation: `close") ;
             Lwt.wakeup_later notify_rd_exit () ;
             flow.Easy_flow.rd_closed <- true ;
-            Easy_flow.safely_close flow >|= fun () ->
-            (* XXX(dinosaure): this addition is due to the fact that
-               [ocaml-h2] never closes the write loop (it emits [`Close]
-               only if we call [shutdown]). *)
-            Runtime.shutdown connection in
+            Easy_flow.safely_close flow in
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
           Runtime.report_exn connection exn ;
@@ -236,6 +215,7 @@ end = struct
       let report_error err =
         Runtime.report_exn connection (to_flow_write_exception err) in
       let rec go () =
+        Log.debug (fun m -> m "Compute next write operation.") ;
         match Runtime.next_write_operation connection with
         | `Write iovecs ->
             Log.debug (fun m -> m "next write operation: `write") ;
@@ -245,7 +225,7 @@ end = struct
         | `Yield ->
             Log.debug (fun m -> m "next write operation: `yield") ;
             Runtime.yield_writer connection wr_fiber ;
-            Lwt.return_unit
+            Lwt.pause ()
         | `Close _ ->
             Log.debug (fun m -> m "next write operation: `close") ;
             Lwt.wakeup_later notify_wr_exit () ;
@@ -264,7 +244,7 @@ end = struct
 end
 
 module Client (Flow : Mirage_flow.S) (Runtime : RUNTIME) : sig
-  val run : sleep:sleep -> Runtime.t -> Flow.flow -> unit Lwt.t
+  val run : Runtime.t -> Flow.flow -> unit Lwt.t
 end = struct
   open Lwt.Infix
 
@@ -278,36 +258,36 @@ end = struct
   let to_flow_write_exception err : exn =
     Flow_write (Fmt.str "%a" Flow.pp_write_error err)
 
-  let run ~sleep connection flow =
-    Easy_flow.create ~sleep flow >>= fun flow ->
+  let run connection flow =
+    Easy_flow.create flow >>= fun flow ->
     let rd_exit, notify_rd_exit = Lwt.wait () in
     let wr_exit, notify_wr_exit = Lwt.wait () in
 
-    let rec rd_loop () =
+    let rec rd_fiber () =
       let report_error err =
         Runtime.report_exn connection (to_flow_exception err) in
       let rec go () =
         match Runtime.next_read_operation connection with
         | `Read ->
             Log.debug (fun m -> m "next read operation: `read") ;
-            Easy_flow.recv flow ~report_error ~read:(Runtime.read connection)
+            Easy_flow.recv flow ~report_error ~report_closed:ignore
+              ~read:(Runtime.read connection)
               ~read_eof:(Runtime.read_eof connection)
             >>= fun _ -> go ()
         | `Yield ->
             Log.debug (fun m -> m "next read operation: `yield") ;
-            Runtime.yield_reader connection rd_loop ;
+            Runtime.yield_reader connection rd_fiber ;
             Lwt.return_unit
         | `Close ->
             Log.debug (fun m -> m "next read operation: `close.") ;
             Lwt.wakeup_later notify_rd_exit () ;
             flow.Easy_flow.rd_closed <- true ;
-            Easy_flow.safely_close flow >|= fun () ->
-            Runtime.shutdown connection in
+            Easy_flow.safely_close flow in
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
           Runtime.report_exn connection exn ;
           Lwt.return_unit) in
-    let rec wr_loop () =
+    let rec wr_fiber () =
       let report_error err =
         Runtime.report_exn connection (to_flow_write_exception err) in
       let rec go () =
@@ -319,19 +299,19 @@ end = struct
             go ()
         | `Yield ->
             Log.debug (fun m -> m "next write operation: `yield.") ;
-            Runtime.yield_writer connection wr_loop ;
+            Runtime.yield_writer connection wr_fiber ;
             Lwt.return ()
         | `Close _ ->
             Log.debug (fun m -> m "next write operation: `close.") ;
             Lwt.wakeup_later notify_wr_exit () ;
-            Lwt.return_unit in
-
+            flow.Easy_flow.wr_closed <- true ;
+            Easy_flow.safely_close flow in
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
           Runtime.report_exn connection exn ;
           Lwt.return ()) in
-    wr_loop () ;
-    rd_loop () ;
+    wr_fiber () ;
+    rd_fiber () ;
     Lwt.join [ rd_exit; wr_exit ] >>= fun () ->
     Log.debug (fun m -> m "End of transmission.") ;
     Easy_flow.close flow
@@ -398,20 +378,20 @@ let serve_when_ready :
        | Error _ as err -> close t >>= fun () -> Lwt.return err in
      stop_result >>= function Ok () | Error `Closed -> Lwt.return_unit)
 
-let server : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
- fun (module Runtime) ~sleep conn flow ->
+let server : type t. t runtime -> t -> Mimic.flow -> unit Lwt.t =
+ fun (module Runtime) conn flow ->
   let module Server = Server (Mimic) (Runtime) in
-  Server.server ~sleep conn flow
+  Server.server conn flow
 
-let serve ~sleep ?stop service t =
+let serve ?stop service t =
   let (Service { accept; handshake; connection; close }) = service in
   let handler flow =
     connection flow >>= function
-    | Ok (flow, Runtime (runtime, conn)) -> server runtime ~sleep conn flow
+    | Ok (flow, Runtime (runtime, conn)) -> server runtime conn flow
     | Error _ -> Lwt.return_unit in
   serve_when_ready ?stop ~handler { accept; handshake; close } t
 
-let run : type t. t runtime -> sleep:sleep -> t -> Mimic.flow -> unit Lwt.t =
- fun (module Runtime) ~sleep conn flow ->
+let run : type t. t runtime -> t -> Mimic.flow -> unit Lwt.t =
+ fun (module Runtime) conn flow ->
   let module Client = Client (Mimic) (Runtime) in
-  Client.run ~sleep conn flow
+  Client.run conn flow

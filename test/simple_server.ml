@@ -12,8 +12,10 @@ let reporter ppf =
     msgf @@ fun ?header ?tags fmt -> with_metadata header tags k ppf fmt in
   { Logs.report }
 
+let apply v f = f v
 let sigpipe = 13
 let () = Mirage_crypto_rng_unix.initialize ()
+let () = Printexc.record_backtrace true
 
 (*
 let () = Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true ()
@@ -47,7 +49,7 @@ let getline queue =
       Some (Bytes.unsafe_to_string tmp)
   | None -> None
 
-let http_large filename (_ip, _port) ic oc =
+let http_large filename ?shutdown:_ (_ip, _port) ic oc =
   let open Httpaf in
   Body.close_reader ic ;
   let ic = open_in filename in
@@ -62,7 +64,7 @@ let http_large filename (_ip, _port) ic oc =
   go () ;
   close_in ic
 
-let http_ping_pong (_ip, _port) ic oc =
+let http_ping_pong ?shutdown:_ (_ip, _port) ic oc =
   let open Httpaf in
   let open Lwt.Infix in
   let closed = ref false and queue = Ke.create ~capacity:0x1000 Bigarray.char in
@@ -91,7 +93,7 @@ let http_ping_pong (_ip, _port) ic oc =
         Lwt.return_unit in
   Lwt.async go
 
-let request_handler large _flow (ip, port) reqd =
+let request_handler large ?shutdown _flow (ip, port) reqd =
   let open Httpaf in
   let request = Reqd.request reqd in
   match request.Request.target with
@@ -99,20 +101,22 @@ let request_handler large _flow (ip, port) reqd =
       let headers = Headers.of_list [ ("transfer-encoding", "chunked") ] in
       let response = Response.create ~headers `OK in
       let oc = Reqd.respond_with_streaming reqd response in
-      http_ping_pong (ip, port) (Reqd.request_body reqd) oc
+      http_ping_pong ?shutdown (ip, port) (Reqd.request_body reqd) oc
   | "/ping" ->
       let headers = Headers.of_list [ ("content-length", "4") ] in
       let response = Response.create ~headers `OK in
-      Reqd.respond_with_string reqd response "pong"
+      Reqd.respond_with_string reqd response "pong" ;
+      Option.iter (apply ()) shutdown
   | "/pong" ->
       let headers = Headers.of_list [ ("content-length", "4") ] in
       let response = Response.create ~headers `OK in
-      Reqd.respond_with_string reqd response "ping"
+      Reqd.respond_with_string reqd response "ping" ;
+      Option.iter (apply ()) shutdown
   | "/large" ->
       let headers = Headers.of_list [ ("transfer-encoding", "chunked") ] in
       let response = Response.create ~headers `OK in
       let oc = Reqd.respond_with_streaming reqd response in
-      http_large large (ip, port) (Reqd.request_body reqd) oc
+      http_large large ?shutdown (ip, port) (Reqd.request_body reqd) oc
   | _ -> assert false
 
 let error_handler _ ?request:_ error _respond =

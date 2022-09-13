@@ -62,13 +62,12 @@ end
 
 type 'conn runtime = (module RUNTIME with type t = 'conn)
 type impl = Runtime : 'conn runtime * 'conn -> impl
-type sleep = int64 -> unit Lwt.t
 
 exception Flow of string
 exception Flow_write of string
 
-val server : 'conn runtime -> sleep:sleep -> 'conn -> Mimic.flow -> unit Lwt.t
-val run : 'conn runtime -> sleep:sleep -> 'conn -> Mimic.flow -> unit Lwt.t
+val server : 'conn runtime -> 'conn -> Mimic.flow -> unit Lwt.t
+val run : 'conn runtime -> 'conn -> Mimic.flow -> unit Lwt.t
 
 type 't service
 
@@ -80,8 +79,4 @@ val service :
   't service
 
 val serve :
-  sleep:sleep ->
-  ?stop:Lwt_switch.t ->
-  't service ->
-  't ->
-  [ `Initialized of unit Lwt.t ]
+  ?stop:Lwt_switch.t -> 't service -> 't -> [ `Initialized of unit Lwt.t ]
