@@ -1,94 +1,101 @@
+open Rresult
 open Lwt.Infix
 
 let ( <.> ) f g = fun x -> f (g x)
-let ( >>? ) = Lwt_result.bind
-
-let app =
-  let open Rock in
-  let handler _req =
-    let resp = Response.make ~status:`OK ~body:(Body.of_string "Hello Rock!") () in
-    Lwt.return resp in
-  App.create ~handler ()
+let always x = fun _ -> x
 
 module Make
-  (_ : Mirage_console.S)
   (Random : Mirage_random.S)
-  (Time : Mirage_time.S)
-  (Mclock : Mirage_clock.MCLOCK)
-  (Pclock : Mirage_clock.PCLOCK)
-  (Stack : Tcpip.Stack.V4V6)
-  (Paf : Paf_mirage.S with type stack = Stack.TCP.t
-                       and type ipaddr = Ipaddr.t) = struct
-  module DNS = Dns_client_mirage.Make (Random) (Time) (Mclock) (Pclock) (Stack)
-  module NSS = Ca_certs_nss.Make(Pclock)
-  module Letsencrypt = LE.Make(Time)(Stack)
+  (Certificate : Mirage_kv.RO)
+  (Key : Mirage_kv.RO)
+  (Tcp : Tcpip.Tcp.S with type ipaddr = Ipaddr.t)
+  (Connect : Connect.S) = struct
+  module Paf = Paf_mirage.Make (Tcp)
 
-  let authenticator = Result.get_ok (NSS.authenticator ())
+  let tls key_ro certificate_ro =
+    let open Lwt_result.Infix in
+    Lwt.Infix.(Key.list key_ro Mirage_kv.Key.empty
+    >|= R.reword_error (R.msgf "%a" Key.pp_error)) >>= fun keys ->
+    let keys, _ = List.partition (fun (_, t) -> t = `Value) keys in
+    Lwt.Infix.(Certificate.list certificate_ro Mirage_kv.Key.empty
+    >|= R.reword_error (R.msgf "%a" Certificate.pp_error)) >>= fun certificates ->
+    let certificates, _ = List.partition (fun (_, t) -> t = `Value) certificates in
+    let fold acc (name, _) =
+      let open Lwt_result.Infix in
+      Lwt.Infix.(Certificate.get certificate_ro
+        Mirage_kv.Key.(empty / name) >|= R.reword_error (R.msgf "%a" Certificate.pp_error))
+      >|= Cstruct.of_string
+      >>= (Lwt.return <.> X509.Certificate.decode_pem_multiple)
+      >>= fun certificates -> Lwt.return acc >>= fun acc ->
+      Lwt.return_ok ((name, certificates) :: acc) in
+    Lwt_list.fold_left_s fold (Ok []) certificates >>= fun certificates ->
+    let fold acc (name, _) =
+        let open Lwt_result.Infix in
+        Lwt.Infix.(Key.get key_ro 
+          Mirage_kv.Key.(empty / name) >|= R.reword_error (R.msgf "%a" Key.pp_error))
+        >|= Cstruct.of_string
+        >>= (Lwt.return <.> X509.Private_key.decode_pem)
+        >>= fun key -> Lwt.return acc
+        >>= fun acc -> Lwt.return_ok ((name, key) :: acc) in
+    Lwt_list.fold_left_s fold (Ok []) keys >>= fun keys ->
+    let tbl = Hashtbl.create 0x10 in
+    List.iter (fun (name, certificates) -> match List.assoc_opt name keys with
+      | Some key -> Hashtbl.add tbl name (certificates, key)
+      | None -> ()) certificates ;
+    match Hashtbl.fold (fun _ certchain acc -> certchain :: acc) tbl [] with
+    | [] -> Lwt.return_ok `None
+    | [ certchain ] -> Lwt.return_ok (`Single certchain)
+    | certchains -> Lwt.return_ok (`Multiple certchains)
 
-  let error_handler _ ?request:_ _ _ = ()
+  let http_1_1_request_handler ~ctx ~authenticator ?shutdown:_ flow reqd =
+    let module R = (val (Mimic.repr Paf.tcp_protocol)) in
+    fun reqd ->
+      match (Httpaf.Reqd.request reqd).Httpaf.Request.meth with
+      | `CONNECT ->
+        Paf.TCP.no_close flow ;
+        let to_close = function
+          | R.T flow -> Paf.TCP.to_close flow
+          | _ -> () in
+        Server.http_1_1_request_handler ~ctx ~authenticator ~to_close (R.T flow) reqd
+      | _ ->
+        Server.http_1_1_request_handler ~ctx ~authenticator ~to_close:(always ()) (R.T flow) reqd
 
-  let get_certificate ?(production= false) cfg stackv4v6 =
-    Paf.init ~port:80 (Stack.tcp stackv4v6) >>= fun t ->
-    let service =
-      Paf.http_service ~error_handler
-        (fun _flow -> Letsencrypt.request_handler)
-    in
-    Lwt_switch.with_switch @@ fun stop ->
-    let `Initialized th = Paf.serve ~stop service t in
-    let gethostbyname dns domain_name =
-      DNS.gethostbyname dns domain_name >>? fun ipv4 ->
-      Lwt.return_ok (Ipaddr.V4 ipv4) in
-    let ctx = Letsencrypt.ctx
-      ~gethostbyname
-      ~authenticator
-      (DNS.create stackv4v6) stackv4v6 in
-    let fiber =
-      Letsencrypt.provision_certificate ~production cfg ctx >>= fun certificates ->
-      Lwt_switch.turn_off stop >>= fun () -> Lwt.return certificates in
-    Lwt.both th fiber >>= function
-    | (_, Ok certificates) -> Lwt.return certificates
-    | (_, Error (`Msg err)) -> failwith err
+  let alpn_handler ~ctx ~authenticator =
+    let module R = (val (Mimic.repr Paf.tls_protocol)) in
+    let to_close = function
+      | R.T flow -> Paf.TLS.to_close flow
+      | _ -> () in
+    { Alpn.error= Server.alpn_error_handler
+    ; Alpn.request= (fun ?shutdown flow edn reqd protocol ->
+      Server.alpn_request_handler ~ctx ~authenticator ~to_close ?shutdown (R.T flow) edn reqd protocol) }
 
-  type kind =
-    | HTTP
-    | HTTPS of Letsencrypt.configuration
+  let run_with_tls ~ctx ~authenticator ~tls (http_port, https_port) tcpv4v6 =
+    let alpn_service = Paf.alpn_service ~tls (alpn_handler ~ctx ~authenticator) in
+    let http_1_1_service =
+      Paf.http_service ~error_handler:Server.http_1_1_error_handler
+        (http_1_1_request_handler ~ctx ~authenticator) in
+    Paf.init ~port:https_port tcpv4v6 >|= Paf.serve alpn_service >>= fun (`Initialized th0) ->
+    Paf.init ~port:http_port tcpv4v6 >|= Paf.serve http_1_1_service >>= fun (`Initialized th1) ->
+    Lwt.both th0 th1 >>= fun ((), ()) -> Lwt.return_unit
 
-  let rock stackv4v6 v t ~request_handler ~error_handler = match v with
-    | HTTP ->
-      let service = Paf.http_service ~error_handler:(fun _ -> error_handler)
-        (fun _flow _dst -> request_handler) in
-      let `Initialized th = Paf.serve service t in th
-    | HTTPS cfg ->
-      get_certificate ~production:(Key_gen.production ()) cfg stackv4v6 >>= fun certificates ->
-      let tls = Tls.Config.server ~certificates () in
-      let service = Paf.https_service ~tls ~error_handler:(fun _ -> error_handler)
-        (fun _flow _dst -> request_handler) in
-      let `Initialized th = Paf.serve service t in th
+  let run ~ctx ~authenticator port tcpv4v6 =
+    let http_1_1_service =
+      Paf.http_service ~error_handler:Server.http_1_1_error_handler
+        (http_1_1_request_handler ~ctx ~authenticator) in
+    Paf.init ~port tcpv4v6 >|= Paf.serve http_1_1_service >>= fun (`Initialized th) -> th
 
-  let host v =
-    Result.bind (Domain_name.of_string v) Domain_name.host
-
-  let cfg ?email ?hostname ?seed ?certificate_seed = function
-    | false -> HTTP
-    | true -> match hostname with
-      | Some hostname ->
-        HTTPS { LE.hostname
-              ; email
-              ; account_seed= seed
-              ; account_key_type= `ED25519
-              ; account_key_bits= None
-              ; certificate_seed
-              ; certificate_key_type= `ED25519
-              ; certificate_key_bits= None }
-      | None -> failwith "Missing hostname"
-
-  let start _console _random _time _mclock _pclock stackv4v6 service =
-    let email = Option.bind (Key_gen.email ()) (Result.to_option <.> Emile.of_string) in
-    let hostname = Option.bind (Key_gen.hostname ()) (Result.to_option <.> host) in
-    let cfg = cfg ?email
-                  ?hostname
-                  ?seed:(Key_gen.account_seed ())
-                  ?certificate_seed:(Key_gen.cert_seed ())
-              (Key_gen.https ()) in
-    Rock.Server_connection.run (rock stackv4v6 cfg service) app
+  let start _time _random certificate_ro key_ro tcpv4v6 ctx =
+    let open Lwt.Infix in
+    let authenticator = Connect.authenticator in
+    tls key_ro certificate_ro >>= fun tls ->
+    match Key_gen.tls (), tls, Key_gen.alpn () with
+    | true, Ok certificates, None ->
+      run_with_tls ~ctx ~authenticator ~tls:(Tls.Config.server ~certificates ~alpn_protocols:[ "h2"; "http/1.1" ] ())
+        (Key_gen.ports ()) tcpv4v6
+    | true, Ok certificates, Some (("http/1.1" | "h2") as alpn_protocol) ->
+      run_with_tls ~ctx ~authenticator ~tls:(Tls.Config.server ~certificates ~alpn_protocols:[ alpn_protocol ] ())
+        (Key_gen.ports ()) tcpv4v6
+    | false, _, _ -> run ~ctx ~authenticator (fst (Key_gen.ports ())) tcpv4v6
+    | _, _, Some protocol -> Fmt.failwith "Invalid protocol %S" protocol
+    | true, Error _, _ -> Fmt.failwith "A TLS server requires, at least, one certificate and one private key."
 end
