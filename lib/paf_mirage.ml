@@ -381,17 +381,3 @@ let run ~ctx handler request =
   | Ok flow, Some (`TLS alpn) ->
       let edn = endpoint_of_flow ress in
       Alpn.run ?alpn handler edn request flow
-
-module TCPV4V6 (Stack : Tcpip.Stack.V4V6) : sig
-  include
-    Tcpip.Tcp.S
-      with type t = Stack.TCP.t
-       and type ipaddr = Ipaddr.t
-       and type flow = Stack.TCP.flow
-
-  val connect : Stack.t -> t Lwt.t
-end = struct
-  include Stack.TCP
-
-  let connect stackv4v6 = Lwt.return (Stack.tcp stackv4v6)
-end

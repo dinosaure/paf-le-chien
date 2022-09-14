@@ -1,3 +1,44 @@
+(** {1:Let's encrypt challenge with [paf].}
+
+    [Paf] provides a layer to be able to: 1) launch a simple HTTP server which
+    will do the Let's encrypt challenge 2) launch a simple HTTP client to ask a
+    new certificate
+
+    The HTTP server must be behind the domain-name for which you want a
+    certificate.
+
+    The usual way to get a certificate is to prepare a {!type:configuration}
+    value, prepare the HTTP server and launch concurrently the server and the
+    client with an ability to stop the server when the client finish the job:
+
+    {[
+      module LE = LE.Make (Time) (Stack)
+
+      let provision () =
+        Paf.init ~port:80 (Stack.tcp stackv4v6) >>= fun t ->
+        let service = Paf.http_service
+          ~error_handler:ignore_error
+          (fun ?shutdown:_ _ -> LE.request_handler) in
+        let stop = Lwt_switch.create () in
+        let `Initialized th0 = Paf.serve ~stop service in
+        let th1 =
+          LE.provision_certificate
+            ~production:false
+            configuration
+            (LE.ctx ~gethostbyname ~authenticator dns stackv4v6)
+          >>= fun certificates ->
+          Lwt_switch.turn_off stop >>= fun () ->
+          Lwt.return certificates in
+        Lwt.both th0 th1 >>= function
+        | ((), Ok certificates) -> ...
+        | ((), Error _) -> ...
+    ]}
+
+    The client requires few values:
+
+    - a [gethostbyname] (you can see {!val:Unix.gethostbyname}
+    - a [authenticator] (you can check [ca-certs] and [ca-certs-nss] packages) *)
+
 type configuration = {
   email : Emile.mailbox option;
   certificate_seed : string option;

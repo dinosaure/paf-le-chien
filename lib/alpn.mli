@@ -91,6 +91,7 @@ val h2 :
 
 type server_error =
   [ `Bad_gateway | `Bad_request | `Exn of exn | `Internal_server_error ]
+(** Type of server errors. *)
 
 type ('flow, 'edn) info = {
   alpn : 'flow -> string option;
@@ -99,9 +100,9 @@ type ('flow, 'edn) info = {
 }
 (** The type of information from a ['flow]:
 
-    - [alpn] is a fonction which is able to extract the result of the
+    - [alpn] is a function which is able to extract the result of the
       negotiation between the client & the server about which protocol we need
-      to start
+      to use.
     - [peer] returns a [string] representation of the given ['flow] to help to
       print out some logs about this client.
     - [injection] is the function which wraps the given ['flow] to a
@@ -137,6 +138,44 @@ type ('flow, 'edn) server_handler = {
     ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol ->
     unit;
 }
+(** The type of handler. To be able to handle http/1.1 and h2 requests with the
+    same function, we have chosen to use record with universally quantified
+    types. Such design requires some constraints: 1) [error] and [request]
+    should be defined at top 2) if they requires extra informations (such as the
+    path of file, a value to connect to a database, etc.), they can be used into
+    handlers but the record must contains non-curried version of these handlers.
+    3) you must use type annotation due to the GADT {!type:protocol}
+
+    For instance, we have a value [db] is required by our request handler. You
+    can describe your handler by this way:
+
+    {[
+      let error_handler
+        : type reqd headers request response ro wo.
+          _ -> (reqd, headers, request, response, ro, wo) Alpn.protocol ->
+          ?request:request -> _ -> (headers -> wo) -> unit
+        = fun edn protocol ?request error respond ->
+          match protocol with
+          | Alpn.HTTP_1_1 _ ->
+            (* everything is specialized to the [Httpaf] module. You can use
+               [?request] as an [Httpaf.Request.t option] without type error. *)
+          | Alpn.H2 _ ->
+            (* everything is specialized to the [H2] module. *)
+
+      let request_handler
+        : type reqd headers request response ro wo.
+          Database.t -> ?shutdown -> _ -> _ -> reqd ->
+          (reqd, headers, request, response, ro, wo) Alpn.protocol -> unit
+        = fun db ?shutdown flow edn reqd -> function
+        | Alpn.HTTP_1_1 _ -> ...
+        | Alpn.H2 _ -> ...
+
+      let handler db =
+        { error= (fun edn protocol ?request error respond ->
+                error_handler edn protocol ?request error respond)
+        ; request= (fun ?shutdown flow edn reqd protocol ->
+                request_handler db ?shutdown flow end reqd protocol) }
+    ]} *)
 
 val service :
   ('flow, 'edn) info ->
@@ -145,8 +184,8 @@ val service :
   ('t -> ('socket, ([> `Closed | `Msg of string ] as 'error)) result Lwt.t) ->
   ('t -> unit Lwt.t) ->
   't Paf.service
-(** [service info ~error_handler ~request_handler connect accept close] creates
-    a new {!type:Paf.service} over the {i socket} ['t]. From the given
+(** [service info handler connect accept close] creates a new
+    {!type:Paf.service} over the {i socket} ['flow]. From the given
     implementation of [accept] and [close], we are able to instantiate the
     {i main loop}. Then, from the given [info], we extract informations such the
     application layer protocol and choose which protocol we will use. Currently,
@@ -155,10 +194,10 @@ val service :
     - [Some "http/1.0" | Some "http/1.1" | None], we launch an [http/af] service
     - [Some "h2"], we launch an [h2] service
 
-    The user is able to identify which protocol we launched by {!resp_handler}.
-    The returned service can be run with {!Paf.serve}. Here is an example with
-    [Lwt_unix.file_descr] and the TCP/IP transmission protocol (without ALPN
-    negotiation):
+    The user is able to identify which protocol we launched by
+    {!type:server_handler}. The returned service can be run with {!Paf.serve}.
+    Here is an example with [Lwt_unix.file_descr] and the TCP/IP transmission
+    protocol (without ALPN negotiation):
 
     {[
       let _, protocol
@@ -183,9 +222,7 @@ val service :
         ; Alpn.injection=
           (fun socket -> R.T socket) }
 
-      let service = Alpn.service info
-        ~error_handler
-        ~request_handler
+      let service = Alpn.service info handler
         accept Lwt_unix.close
 
       let fiber =
@@ -203,6 +240,7 @@ type client_error =
   | `Invalid_response_body_length_v1 of Httpaf.Response.t
   | `Invalid_response_body_length_v2 of H2.Response.t
   | `Protocol_error of H2.Error_code.t * string ]
+(** Type of client errors. *)
 
 type 'edn client_handler = {
   error :
@@ -221,10 +259,15 @@ type 'edn client_handler = {
     ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol ->
     unit;
 }
+(** The type of client handler. As {!type:server_handler}, we have chosen to use
+    a record with universally quantified types. Please follow the explanation
+    given about {!type:server_handler} to understand how to use it. *)
 
-type body =
-  | Body_HTTP_1_1 : [ `write ] Httpaf.Body.t -> body
-  | Body_H2 : H2.Body.Writer.t -> body
+type alpn_response =
+  | Response_HTTP_1_1 :
+      ([ `write ] Httpaf.Body.t * Httpaf.Client_connection.t)
+      -> alpn_response
+  | Response_H2 : H2.Body.Writer.t * H2.Client_connection.t -> alpn_response
 
 val run :
   ?alpn:string ->
@@ -232,7 +275,7 @@ val run :
   'edn ->
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
   Mimic.flow ->
-  (body, [> `Msg of string ]) result Lwt.t
+  (alpn_response, [> `Msg of string ]) result Lwt.t
 (** [run ?alpn ~client_handler edn req flow] tries communicate to [edn] via
     [flow] with a certain protocol according to the given [alpn] value and the
     given request. It returns the body of the request to allow the user to write
@@ -253,6 +296,5 @@ val run :
         (* See Mimic for more details. *)
         Mimic.resolve ctx >>= function
         | Error _ as err -> Lwt.return err
-        | Ok flow ->
-            run ?alpn:None ~error_handler ~response_handler uri request flow
+        | Ok flow -> run ?alpn:None handler uri request flow
     ]} *)

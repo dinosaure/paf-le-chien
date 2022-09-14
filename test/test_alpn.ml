@@ -173,16 +173,16 @@ let test01 =
   >>= fun ((body, ()), ()) ->
   request >>= fun request ->
   match (request, body) with
-  | HTTP_1_1, Alpn.Body_HTTP_1_1 _ ->
+  | HTTP_1_1, Alpn.Response_HTTP_1_1 _ ->
       Alcotest.(check pass) "http/1.1" () () ;
       Lwt.return_unit
   | _ -> Alcotest.failf "Unexpected version of HTTP"
 
 let close_body = function
-  | Alpn.Body_HTTP_1_1 _ as body -> body
-  | Alpn.Body_H2 body as v ->
+  | Alpn.Response_HTTP_1_1 _ as response -> response
+  | Alpn.Response_H2 (body, _) as response ->
       H2.Body.Writer.close body ;
-      v
+      response
 
 let test02 =
   Alcotest_lwt.test_case "h2" `Quick @@ fun _sw () ->
@@ -203,7 +203,7 @@ let test02 =
   >>= fun ((body, ()), ()) ->
   request >>= fun request ->
   match (request, body) with
-  | HTTP_2_0, Alpn.Body_H2 _ ->
+  | HTTP_2_0, Alpn.Response_H2 _ ->
       Alcotest.(check pass) "h2" () () ;
       Lwt.return_unit
   | _ -> Alcotest.failf "Unexpected version of HTTP"

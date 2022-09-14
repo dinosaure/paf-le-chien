@@ -15,10 +15,18 @@ module type S = sig
       We expose these protocols in the sense of [mimic]. They are registered
       globally with [mimic] and are usable {i via} [mimic] (see
       {!Mimic.resolve}) as long as the given [ctx] contains {!val:tcp_edn}
-      and/or {!val:tls_edn}.
+      and/or {!val:tls_edn}. Such way to instance {i something} which represents
+      these protocols and usable as a {!Mirage_flow.S} are useful for the
+      client-side, see {!val:run}.
 
-      Such way to instance {i something} which represents these protocols and
-      usable as a {!Mirage_flow.S} are useful for the client-side, see {!run}. *)
+      We expose 2 new functions: [no_close]/[to_close]. In a specific context
+      such as the proxy, the handler should notify us to fakely close the
+      underlying connection. Indeed, [Paf] will try to close your connection as
+      soon as the HTTP transmission is finished. However, in the case of a
+      proxy, the connection must remains then. {!val:TCP.no_close} sets the
+      [flow] so that the next call to {!val:TCP.close} is ignored.
+      {!val:to_close} resets the [flow] to the basic behavior - we will really
+      close the given [flow]. *)
 
   module TCP : sig
     include Mirage_flow.S
@@ -132,7 +140,7 @@ module type S = sig
       - HTTP/1.1 requests
       - and H2 requests
 
-      The choice is made by the ALPN challende on the TLS layer where the client
+      The choice is made by the ALPN challenge on the TLS layer where the client
       can send which protocol he/she wants to use. Therefore, the server must
       handle these two cases. *)
 
@@ -141,10 +149,10 @@ module type S = sig
     ?config:Httpaf.Config.t * H2.Config.t ->
     (TLS.flow, dst) Alpn.server_handler ->
     t Paf.service
-  (** [alpn_service ~tls ~error_handler request_handler] makes an H2/HTTP/AF
-      service over TLS (from the given TLS configuration). An HTTP request
-      (version 1.1 or 2) is handled then by [request_handler]. The returned
-      service is not yet launched (see {!server}). *)
+  (** [alpn_service ~tls handler] makes an H2/HTTP/AF service over TLS (from the
+      given TLS configuration). An HTTP request (version 1.1 or 2) is handled
+      then by [handler]. The returned service is not yet launched (see
+      {!val:serve} to launch it). *)
 
   val serve :
     ?stop:Lwt_switch.t -> 't Paf.service -> 't -> [ `Initialized of unit Lwt.t ]
@@ -171,19 +179,9 @@ val run :
   ctx:Mimic.ctx ->
   (Ipaddr.t * int) option Alpn.client_handler ->
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
-  (Alpn.body, [> Mimic.error ]) result Lwt.t
-(** [run ~ctx ~error_handler ~response_handler req] sends an HTTP request (H2 or
-    HTTP/1.1) to a peer which can be reached {i via} the given Mimic's [ctx]. If
-    the connection is recognized as a {!tls_protocol}, we proceed an ALPN
-    challenge between what the user chosen and what the peer can handle.
-    Otherwise, we send a simple HTTP/1.1 request or a [h2c] request. *)
-
-module TCPV4V6 (Stack : Tcpip.Stack.V4V6) : sig
-  include
-    Tcpip.Tcp.S
-      with type t = Stack.TCP.t
-       and type ipaddr = Ipaddr.t
-       and type flow = Stack.TCP.flow
-
-  val connect : Stack.t -> t Lwt.t
-end
+  (Alpn.alpn_response, [> Mimic.error ]) result Lwt.t
+(** [run ~ctx handler req] sends an HTTP request (H2 or HTTP/1.1) to a peer
+    which can be reached {i via} the given Mimic's [ctx]. If the connection is
+    recognized as a {!tls_protocol}, we proceed an ALPN challenge between what
+    the user chosen and what the peer can handle. Otherwise, we send a simple
+    HTTP/1.1 request or a [h2c] request. *)

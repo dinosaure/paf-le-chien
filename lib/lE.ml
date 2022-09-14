@@ -17,7 +17,6 @@ let scheme = Mimic.make ~name:"paf-le-scheme"
 let port = Mimic.make ~name:"paf-le-port"
 let domain_name = Mimic.make ~name:"paf-le-domain-name"
 let ipaddr = Mimic.make ~name:"paf-le-ipaddr"
-let sleep = Mimic.make ~name:"paf-le-sleep"
 
 module Httpaf_Client_connection = struct
   include Httpaf.Client_connection
@@ -379,7 +378,6 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     let tls = Mimic.make ~name:"letsencrypt-tls" in
 
     Mimic.empty
-    |> Mimic.add sleep Time.sleep_ns
     |> Mimic.add stack (Stack.tcp stackv4v6)
     |> Mimic.fold tcp_edn
          Fun.[ req scheme; req stack; req ipaddr; dft port 80 ]

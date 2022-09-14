@@ -201,8 +201,8 @@ let run uri =
   | Error err ->
       Log.err (fun m -> m "Got an error: %a." Mimic.pp_error err) ;
       Lwt.return_error err
-  | Ok (Alpn.Body_H2 _) -> Lwt.return_error (`Msg "Invalid protocol (H2)")
-  | Ok (Alpn.Body_HTTP_1_1 body) -> (
+  | Ok (Alpn.Response_H2 _) -> Lwt.return_error (`Msg "Invalid protocol (H2)")
+  | Ok (Alpn.Response_HTTP_1_1 (body, _)) -> (
       Httpaf.Body.close_writer body ;
       Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
       | `Body body -> Lwt.return_ok body

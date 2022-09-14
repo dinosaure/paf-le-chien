@@ -223,9 +223,11 @@ type 'edn client_handler = {
     unit;
 }
 
-type body =
-  | Body_HTTP_1_1 : [ `write ] Httpaf.Body.t -> body
-  | Body_H2 : H2.Body.Writer.t -> body
+type alpn_response =
+  | Response_HTTP_1_1 :
+      ([ `write ] Httpaf.Body.t * Httpaf.Client_connection.t)
+      -> alpn_response
+  | Response_H2 : H2.Body.Writer.t * H2.Client_connection.t -> alpn_response
 
 let run ?alpn handler edn request flow =
   match (alpn, request) with
@@ -245,7 +247,7 @@ let run ?alpn handler edn request flow =
           ~response_handler in
       Lwt.async (fun () ->
           Paf.run (module H2.Client_connection) (Lazy.force conn) flow) ;
-      Lwt.return_ok (Body_H2 body)
+      Lwt.return_ok (Response_H2 (body, Lazy.force conn))
   | (Some "http/1.1" | None), `V1 request ->
       let error_handler error =
         handler.error edn (HTTP_1_1 http_1_1) (to_client_error_v1 error) in
@@ -263,7 +265,7 @@ let run ?alpn handler edn request flow =
             (module Httpaf_Client_connection)
             (snd (Lazy.force body_and_conn))
             flow) ;
-      Lwt.return_ok (Body_HTTP_1_1 (fst (Lazy.force body_and_conn)))
+      Lwt.return_ok (Response_HTTP_1_1 (Lazy.force body_and_conn))
   | Some protocol, _ ->
       Lwt.return_error
         (`Msg (Fmt.str "Invalid Application layer protocol: %S" protocol))
