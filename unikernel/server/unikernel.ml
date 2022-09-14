@@ -47,7 +47,7 @@ module Make
     | [ certchain ] -> Lwt.return_ok (`Single certchain)
     | certchains -> Lwt.return_ok (`Multiple certchains)
 
-  let http_1_1_request_handler ~ctx ~authenticator ?shutdown:_ flow reqd =
+  let http_1_1_request_handler ~ctx ~authenticator ?shutdown:_ flow _edn =
     let module R = (val (Mimic.repr Paf.tcp_protocol)) in
     fun reqd ->
       match (Httpaf.Reqd.request reqd).Httpaf.Request.meth with
@@ -84,7 +84,7 @@ module Make
         (http_1_1_request_handler ~ctx ~authenticator) in
     Paf.init ~port tcpv4v6 >|= Paf.serve http_1_1_service >>= fun (`Initialized th) -> th
 
-  let start _time _random certificate_ro key_ro tcpv4v6 ctx =
+  let start _random certificate_ro key_ro tcpv4v6 ctx =
     let open Lwt.Infix in
     let authenticator = Connect.authenticator in
     tls key_ro certificate_ro >>= fun tls ->

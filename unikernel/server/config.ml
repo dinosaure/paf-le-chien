@@ -24,8 +24,7 @@ let minipaf =
               ; package "base64" ~sublibs:[ "rfc2045" ] ]
     ~keys:[ Key.v ports
           ; Key.v tls
-          ; Key.v alpn
-          ; Key.v telnet ]
+          ; Key.v alpn ]
     (random @-> kv_ro @-> kv_ro @-> tcpv4v6 @-> conn @-> job)
 
 let conn =

@@ -354,7 +354,7 @@ let connect_http_2_0 ~ctx ~authenticator ~to_close flow reqd =
     let open Lwt.Infix in
     Lwt.async (fun () -> Connect.create_connection ~ctx ~authenticator uri >>= function
     | Ok dst ->
-      let response = H2.Response.create ~headers `OK in
+      let response = H2.Response.create `OK in
       H2.Reqd.respond_with_string reqd response "" ;
       H2.Body.Reader.close (H2.Reqd.request_body reqd) ;
       transmit_over_http ~to_close flow dst

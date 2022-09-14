@@ -1,76 +1,43 @@
-[@@@warning "-45"]
-[@@@warning "-70"]
-
-module type DNS = sig
-  type t
-
-  val gethostbyname : t -> [ `host ] Domain_name.t ->
-    (Ipaddr.V4.t, [> `Msg of string ]) result Lwt.t
-end
-
 open Lwt.Infix
 
 module Make
   (Console : Mirage_console.S)
   (Time : Mirage_time.S)
-  (Pclock : Mirage_clock.PCLOCK)
-  (Stack : Mirage_stack.V4V6)
-  (Dns : DNS) (* XXX(dinosaure): ask @hannesm to provide a signature. *)
-  (Paf : Paf_mirage.S with type stack = Stack.TCP.t) = struct
-  module Client = Paf_cohttp
-  module Nss = Ca_certs_nss.Make(Pclock)
-
-  let authenticator = Result.get_ok (Nss.authenticator ())
-  let default_tls_cfg = Tls.Config.client ~authenticator ()
-
-  let stack = Mimic.make ~name:"stack"
-  let tls = Mimic.make ~name:"tls"
-
-  let with_stack v ctx = Mimic.add stack (Stack.tcp v) ctx
-
-  let with_tcp ctx =
-    let k scheme stack ipaddr port = match scheme with
-      | `HTTP -> Lwt.return_some (stack, ipaddr, port) | _ -> Lwt.return_none in
-    Mimic.(fold Paf.tcp_edn Fun.[ req Client.scheme
-                                ; req stack
-                                ; req Client.ipaddr
-                                ; dft Client.port 80 ] ~k ctx)
-
-  let with_tls ctx =
-    let k scheme domain_name cfg stack ipaddr port = match scheme with
-      | `HTTPS -> Lwt.return_some (domain_name, cfg, stack, ipaddr, port) | _ -> Lwt.return_none in
-    Mimic.(fold Paf.tls_edn Fun.[ req Client.scheme
-                                ; opt Client.domain_name
-                                ; dft tls default_tls_cfg
-                                ; req stack
-                                ; req Client.ipaddr
-                                ; dft Client.port 443 ] ~k ctx)
-
-  let dns = Mimic.make ~name:"dns"
-
-  let with_dns v ctx = Mimic.add dns v ctx
-  let with_sleep ctx = Mimic.add Paf_cohttp.sleep Time.sleep_ns ctx
-
-  let with_resolv ctx =
-    let k dns domain_name =
-      Dns.gethostbyname dns domain_name >>= function
-      | Ok ipv4 -> Lwt.return_some (Ipaddr.V4 ipv4)
-      | _ -> Lwt.return_none in
-    Mimic.(fold Client.ipaddr Fun.[ req dns; req Client.domain_name ] ~k ctx)
+  (HTTP_Client : Http_mirage_client.S) = struct
+  let one_request =
+    Http_mirage_client.one_request
+      ~alpn_protocol:HTTP_Client.alpn_protocol
+      ~authenticator:HTTP_Client.authenticator
 
   let log console fmt = Fmt.kstr (Console.log console) fmt
 
-  let start console _time _pclock stack dns _paf_cohttp =
-    let uri = Uri.of_string (Key_gen.uri ()) in
-    let ctx =
-      Mimic.empty
-      |> with_sleep
-      |> with_tcp         (* stack -> ipaddr -> port => (stack * ipaddr * port) *)
-      |> with_tls         (* domain_name -> tls -> stack -> ipaddr -> port => (domain_name * tls * stack * ipaddr * port) *)
-      |> with_resolv      (* domain_name => ipaddr *)
-      |> with_stack stack (* stack *)
-      |> with_dns dns     (* dns *) in
-    Client.get ~ctx uri >>= fun (_resp, body) ->
-    Cohttp_lwt.Body.to_string body >>= fun str ->
-    log console "%S\n%!" str
+  let print_response console uri response =
+    let ( let* ) = Lwt.bind in
+    let* () = log console ">> %S" uri in
+    let* () = log console "> Version: %a" Httpaf.Version.pp_hum response.Http_mirage_client.version in
+    let* () = log console "> Status: %a" H2.Status.pp_hum response.Http_mirage_client.status in
+    let headers = H2.Headers.to_list response.Http_mirage_client.headers in
+    let headers =
+      let tbl = Hashtbl.create 0x100 in
+      List.iter (fun (k, v) -> Hashtbl.add tbl k v) headers ; tbl in
+    let* () = log console "> Headers: @[<hov>%a@]"
+      Fmt.(Dump.hashtbl string string) headers in
+    let* () = log console ">" in
+    Lwt.return_unit
+
+  let print_body console = function
+    | None -> Lwt.return_unit
+    | Some body ->
+      log console "@[<hov>%a@]" (Hxd_string.pp Hxd.default) body
+
+  let start console _time ctx =
+    one_request ~ctx (Key_gen.uri ()) >>= fun res ->
+    (* XXX(dinosaure): let 5s for the underlying fiber executed into a
+       [Lwt.async] to properly finish the job. *)
+    Time.sleep_ns 5_000_000_000L >>= fun () -> match res with
+    | Ok (response, body) ->
+      print_response console (Key_gen.uri ()) response >>= fun () ->
+      print_body console body
+    | Error err ->
+      log console "ERROR: %a" Mimic.pp_error err
 end
