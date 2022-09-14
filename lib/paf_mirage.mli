@@ -160,7 +160,7 @@ module type S = sig
       [service]. [stop] can be used to stop the service. *)
 end
 
-module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
+module Make (Stack : Tcpip.Tcp.S) :
   S with type stack = Stack.t and type ipaddr = Stack.ipaddr
 
 (** {2 Client implementation.}

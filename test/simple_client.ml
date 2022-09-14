@@ -24,7 +24,7 @@ let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
 let src = Logs.Src.create "simple-client"
 
 module Log = (val Logs.src_log src : Logs.LOG)
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
+module P = Paf_mirage.Make (Tcpip_stack_socket.V4V6.TCP)
 open Lwt.Infix
 
 let ( >>? ) x f =

@@ -85,7 +85,7 @@ module type S = sig
     ?stop:Lwt_switch.t -> 't Paf.service -> 't -> [ `Initialized of unit Lwt.t ]
 end
 
-module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
+module Make (Stack : Tcpip.Tcp.S) :
   S with type stack = Stack.t and type ipaddr = Stack.ipaddr = struct
   open Lwt.Infix
 
