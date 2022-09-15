@@ -13,11 +13,11 @@ server. Via `mimic`, it still keeps the abstraction of the underlying
 TCP/IP connection used.
 
 ```ocaml
-module Make (Time : Mirage_time.S) (Stack : Mirage_stack.V4V6) = struct
-  module Paf = Paf_mirage.Make(Time)(Stack)
+module Make (Stack : Mirage_stack.V4V6) = struct
+  module Paf = Paf_mirage.Make (Stack.TCP)
 
   let start stack =
-    let* t = Paf.init ~port:80 stack in
+    let* t = Paf.init ~port:80 (Stack.tcp stack) in
     let service = Paf.http_service ~error_handler request_handler in
     let `Initialized th = Paf.serve service t in
     th
@@ -25,14 +25,14 @@ end
 
 (* For UNIX with mirage-time-unix & tcpip.stack-socket *)
 
-include Make (Time) (Tcpip_stack_socket.V4V6)
+include Make (Tcpip_stack_socket.V4V6.TCP)
 
 let stack () =
   let open Tcpip_stack_socket.V4V6 in
   TCP.connect ~ipv4_only:false ~ipv6_only:false
     Ipaddr.V4.Prefix.global None
 
-let () = Lwt_main.run (stack () >>= start)
+let () = Lwt_main.run ((Tcpip_stack_socket.V4V6.tcp stack) () >>= start)
 ```
 
 It also provides a client-side with the logic of mimic and let the user to
@@ -82,7 +82,7 @@ let run =
   | Ok flow ->
     let body, conn = Httpaf.Client_connection.request ?config:None req
       ~error_handler ~response_handler in
-    Paf.run (module Httpaf.Client_connection) ~sleep conn flow >>= fun () ->
+    Paf.run (module Httpaf.Client_connection) conn flow >>= fun () ->
     Lwt.return_ok body
 ```
 
@@ -112,10 +112,11 @@ let get_tls_certificate stack =
   let* t = Paf.init ~port:80 stack in
   let service = Paf.http_service
     ~error_handler
-    LE.request_handler in
+    (fun _ -> LE.request_handler) in
   let `Initialized th = Paf.serve ~stop service in
   let fiber =
-    LE.provision_certificate ~production:false cfg ctx >>= fun res ->
+    LE.provision_certificate ~production:false cfg
+      (LE.ctx ~gethostbyname ~authenticator) >>= fun res ->
     Lwt_switch.turn_off stop >>= fun () -> Lwt.return res in
   Lwt.both (th, fiber) >>= fun (_, tls) -> Lwt.return tls
 ```
@@ -125,11 +126,11 @@ let get_tls_certificate stack =
 Paf provides the logic behind ALPN negotiation according a _certain_ TLS/SSL
 implementation. In other words, Paf is able to correctly dispatch which
 protocol the client wants without a requirement of [ocaml-tls][ocaml-tls] or
-[lwt_ssl][lwt_ssl]. The module [Alpn] is a HTTP service which handles:
+[lwt_ssl][lwt_ssl]. The module `Alpn` is a HTTP service which handles:
 - HTTP/1.1
 - H2
 
-[Alpn] requires:
+`Alpn` requires:
 - the `accept` and the `close` function
 - a way to extract the result of the Application Layer Protocol Negotiation
 - the Mimic's _injection_
@@ -160,9 +161,7 @@ let info =
   ; Alpn.injection=
     (fun socket -> R.T socket) }
 
-let service = Alpn.service info
-  ~error_handler
-  ~request_handler
+let service = Alpn.service info handler
   accept Lwt_unix.close
 
 let fiber =
@@ -170,7 +169,6 @@ let fiber =
   Lwt_unix.bind t (Unix.ADDR_INET (Unix.inet_addr_loopback, 8080))
   >>= fun () ->
   let `Initialized th = Paf.serve
-    ~sleep:(Lwt_unix.sleep <.> Int64.to_float)
     service t in th
 
 let () = Lwt_main.run fiber
