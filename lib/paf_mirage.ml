@@ -50,7 +50,6 @@ module type S = sig
 
   type t
   type dst = ipaddr * int
-  type shutdown = unit -> unit
 
   val init : port:int -> stack -> t Lwt.t
   val accept : t -> (TCP.flow, [> `Closed ]) result Lwt.t
@@ -59,20 +58,14 @@ module type S = sig
   val http_service :
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (?shutdown:shutdown ->
-    TCP.flow ->
-    dst ->
-    Httpaf.Server_connection.request_handler) ->
+    (TCP.flow -> dst -> Httpaf.Server_connection.request_handler) ->
     t Paf.service
 
   val https_service :
     tls:Tls.Config.server ->
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (?shutdown:shutdown ->
-    TLS.flow ->
-    dst ->
-    Httpaf.Server_connection.request_handler) ->
+    (TLS.flow -> dst -> Httpaf.Server_connection.request_handler) ->
     t Paf.service
 
   val alpn_service :
@@ -91,7 +84,6 @@ module Make (Stack : Tcpip.Tcp.S) :
 
   type ipaddr = Stack.ipaddr
   type dst = ipaddr * int
-  type shutdown = unit -> unit
 
   module TCP = struct
     let src = Logs.Src.create "paf-tcp"
@@ -250,19 +242,12 @@ module Make (Stack : Tcpip.Tcp.S) :
     let connection flow =
       let dst = TCP.dst flow in
       let error_handler = error_handler dst in
-      let rec request_handler' reqd =
-        request_handler ?shutdown:(Some shutdown) flow dst reqd
-      and conn =
-        lazy
-          (Httpaf.Server_connection.create ?config ~error_handler
-             request_handler')
-      and shutdown () =
-        Log.debug (fun m -> m "Shutdown the HTTP/1.1 connection.") ;
-        Httpaf.Server_connection.shutdown (Lazy.force conn) in
+      let request_handler' reqd = request_handler flow dst reqd in
+      let conn =
+        Httpaf.Server_connection.create ?config ~error_handler request_handler'
+      in
       Lwt.return_ok
-        ( R.T flow,
-          Paf.Runtime ((module Httpaf.Server_connection), Lazy.force conn) )
-    in
+        (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
     Paf.service connection Lwt.return_ok accept close
 
   let https_service ~tls ?config ~error_handler request_handler =
@@ -282,19 +267,12 @@ module Make (Stack : Tcpip.Tcp.S) :
           TCP.close tcp_flow >>= fun () -> Lwt.return_error err in
     let connection (dst, flow) =
       let error_handler = error_handler dst in
-      let rec request_handler' reqd =
-        request_handler ?shutdown:(Some shutdown) flow dst reqd
-      and conn =
-        lazy
-          (Httpaf.Server_connection.create ?config ~error_handler
-             request_handler')
-      and shutdown () =
-        Log.debug (fun m -> m "Shutdown the connection (http/1.1 & tls).") ;
-        Httpaf.Server_connection.shutdown (Lazy.force conn) in
+      let request_handler' reqd = request_handler flow dst reqd in
+      let conn =
+        Httpaf.Server_connection.create ?config ~error_handler request_handler'
+      in
       Lwt.return_ok
-        ( R.T flow,
-          Paf.Runtime ((module Httpaf.Server_connection), Lazy.force conn) )
-    in
+        (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
     Paf.service connection handshake accept close
 
   let alpn =
@@ -331,9 +309,9 @@ module Make (Stack : Tcpip.Tcp.S) :
           TCP.close tcp_flow >>= fun () ->
           Lwt.return_error (err :> [ TLS.write_error | `Msg of string ]) in
     let module R = (val Mimic.repr tls_protocol) in
-    let request ?shutdown flow edn reqd protocol =
+    let request flow edn reqd protocol =
       match flow with
-      | R.T flow -> handler.Alpn.request ?shutdown flow edn reqd protocol
+      | R.T flow -> handler.Alpn.request flow edn reqd protocol
       | _ -> assert false
       (* XXX(dinosaure): this case should never occur. Indeed, the [injection]
          given to [Alpn.service] only create a [tls_protocol] flow. We just

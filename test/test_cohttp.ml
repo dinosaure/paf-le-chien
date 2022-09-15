@@ -58,12 +58,9 @@ let run_http_and_https_server ~request_handler stop =
   unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun stack ->
   P.init ~port:9090 stack >>= fun socket0 ->
   P.init ~port:3434 stack >>= fun socket1 ->
-  let http =
-    P.http_service ~error_handler (fun ?shutdown _flow ->
-        request_handler ?shutdown) in
+  let http = P.http_service ~error_handler (fun _flow -> request_handler) in
   let https =
-    P.https_service ~tls ~error_handler (fun ?shutdown _flow ->
-        request_handler ?shutdown) in
+    P.https_service ~tls ~error_handler (fun _flow -> request_handler) in
   let (`Initialized fiber0) = P.serve ~stop http socket0 in
   let (`Initialized fiber1) = P.serve ~stop https socket1 in
   Logs.debug (fun m -> m "Server initialised.") ;
@@ -148,7 +145,7 @@ let query_to_assoc str =
     | None -> (str, "") in
   List.map f lst
 
-let request_handler ?shutdown (ip, port) reqd =
+let request_handler (ip, port) reqd =
   let open Httpaf in
   let req = Reqd.request reqd in
   Logs.debug (fun m ->
@@ -163,9 +160,7 @@ let request_handler ?shutdown (ip, port) reqd =
       let resp = Response.create ~headers `OK in
       Reqd.respond_with_string reqd resp contents ;
       Lwt.async @@ fun () ->
-      body_to_string body >|= fun _ ->
-      Logs.debug (fun m -> m "Body drained.") ;
-      Option.iter (apply ()) shutdown
+      body_to_string body >|= fun _ -> Logs.debug (fun m -> m "Body drained.")
   | "/repeat" ->
       Lwt.async @@ fun () ->
       body_to_string body >|= fun str ->
@@ -173,8 +168,7 @@ let request_handler ?shutdown (ip, port) reqd =
         Headers.of_list
           [ ("content-length", string_of_int (String.length str)) ] in
       let resp = Response.create ~headers `OK in
-      Reqd.respond_with_string reqd resp str ;
-      Option.iter (apply ()) shutdown
+      Reqd.respond_with_string reqd resp str
   | target ->
   match Astring.String.cut ~sep:"?" target with
   | Some ("/query", query) ->
@@ -191,7 +185,7 @@ let request_handler ?shutdown (ip, port) reqd =
       let resp = Response.create ~headers `OK in
       Reqd.respond_with_string reqd resp contents ;
       Lwt.async @@ fun () ->
-      body_to_string body >|= fun _ -> Option.iter (apply ()) shutdown
+      body_to_string body >>= fun _ -> Lwt.return_unit
   | _ ->
       Reqd.report_exn reqd Not_found ;
       let contents = "Invalid request." in
@@ -199,8 +193,7 @@ let request_handler ?shutdown (ip, port) reqd =
         Headers.of_list
           [ ("content-length", string_of_int (String.length contents)) ] in
       let resp = Response.create ~headers `Bad_request in
-      Reqd.respond_with_string reqd resp contents ;
-      Option.iter (apply ()) shutdown
+      Reqd.respond_with_string reqd resp contents
 
 let test01 =
   Alcotest_lwt.test_case "simple-http" `Quick @@ fun _sw () ->

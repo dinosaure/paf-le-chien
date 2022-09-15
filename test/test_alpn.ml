@@ -2,7 +2,6 @@ open Lwt.Infix
 
 let ( <.> ) f g x = f (g x)
 let ( >>? ) = Lwt_result.bind
-let apply v f = f v
 
 let reporter ppf =
   let report src level ~over k msgf =
@@ -101,28 +100,25 @@ let request_handler :
     type reqd headers request response ro wo.
     _ ->
     _ ->
-    ?shutdown:_ ->
     _ ->
     _ ->
     reqd ->
     (reqd, headers, request, response, ro, wo) Alpn.protocol ->
     unit =
- fun wk_request wk ?shutdown _flow _edn _reqd -> function
+ fun wk_request wk _flow _edn _reqd -> function
   | Alpn.HTTP_1_1 (module Reqd) ->
       Lwt.wakeup_later wk_request HTTP_1_1 ;
-      Lwt.wakeup_later wk () ;
-      Option.iter (apply ()) shutdown
+      Lwt.wakeup_later wk ()
   | Alpn.H2 (module Reqd) ->
       Lwt.wakeup_later wk_request HTTP_2_0 ;
-      Lwt.wakeup_later wk () ;
-      Option.iter (apply ()) shutdown
+      Lwt.wakeup_later wk ()
 
 let server_handler wk_request wk =
   {
     Alpn.error = error_handler;
     Alpn.request =
-      (fun ?shutdown flow edn reqd protocol ->
-        request_handler wk_request wk ?shutdown flow edn reqd protocol);
+      (fun flow edn reqd protocol ->
+        request_handler wk_request wk flow edn reqd protocol);
   }
 
 let client ~ctx handler req =
@@ -151,7 +147,7 @@ let apply v f = f v
 let fake_client_handler =
   {
     Alpn.error = (fun _ _protocol _error -> ());
-    Alpn.response = (fun ?shutdown:_ _flow _edn _response _body _protocol -> ());
+    Alpn.response = (fun _flow _edn _response _body _protocol -> ());
   }
 
 let test01 =

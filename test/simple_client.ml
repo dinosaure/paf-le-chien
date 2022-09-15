@@ -33,28 +33,18 @@ let ( >>? ) x f =
 let ( <.> ) f g x = f (g x)
 let apply v f = f v
 
-let shutdown ?stop () =
-  match stop with
-  | None -> Lwt.return_unit
-  | Some sw ->
-      Log.debug (fun m -> m "Shutdown the connection.") ;
-      Lwt_switch.turn_off sw
-
 let response_handler :
     type reqd headers request response ro wo.
     _ ->
     f:(Httpaf.Response.t -> string -> unit Lwt.t) ->
-    ?shutdown:P.shutdown ->
     Mimic.flow ->
     (Ipaddr.t * int) option ->
     response ->
     ro ->
     (reqd, headers, request, response, ro, wo) Alpn.protocol ->
     unit =
- fun th_err ~f ?shutdown _flow _edn response body -> function
-  | Alpn.H2 (module Reqd) ->
-      Option.iter (apply ()) shutdown ;
-      failf "Invalid protocol H2"
+ fun th_err ~f _flow _edn response body -> function
+  | Alpn.H2 (module Reqd) -> failf "Invalid protocol H2"
   | Alpn.HTTP_1_1 (module Reqd) -> (
       let buf = Buffer.create 0x100 in
       let th, wk = Lwt.wait () in
@@ -67,12 +57,9 @@ let response_handler :
       Httpaf.Body.schedule_read body ~on_eof ~on_read ;
       Lwt.async @@ fun () ->
       Lwt.pick [ (th >|= fun () -> `Done); th_err ] >>= function
-      | `Done ->
-          f response (Buffer.contents buf) >|= fun () ->
-          Option.iter (apply ()) shutdown
+      | `Done -> f response (Buffer.contents buf)
       | _ ->
           Httpaf.Body.close_reader body ;
-          Option.iter (apply ()) shutdown ;
           Lwt.return_unit)
 
 let failf fmt = Format.kasprintf (fun err -> raise (Failure err)) fmt
@@ -90,8 +77,8 @@ let client_handler th_err ~f wk =
   {
     Alpn.error = (fun edn protocol error -> error_handler wk edn protocol error);
     Alpn.response =
-      (fun ?shutdown edn response body protocol ->
-        response_handler th_err ~f ?shutdown edn response body protocol);
+      (fun edn response body protocol ->
+        response_handler th_err ~f edn response body protocol);
   }
 
 let anchors = []

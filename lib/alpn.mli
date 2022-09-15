@@ -131,7 +131,6 @@ type ('flow, 'edn) server_handler = {
     unit;
   request :
     'reqd 'headers 'request 'response 'ro 'wo.
-    ?shutdown:(unit -> unit) ->
     'flow ->
     'edn ->
     'reqd ->
@@ -164,17 +163,17 @@ type ('flow, 'edn) server_handler = {
 
       let request_handler
         : type reqd headers request response ro wo.
-          Database.t -> ?shutdown -> _ -> _ -> reqd ->
+          Database.t -> _ -> _ -> reqd ->
           (reqd, headers, request, response, ro, wo) Alpn.protocol -> unit
-        = fun db ?shutdown flow edn reqd -> function
+        = fun db flow edn reqd -> function
         | Alpn.HTTP_1_1 _ -> ...
         | Alpn.H2 _ -> ...
 
       let handler db =
         { error= (fun edn protocol ?request error respond ->
                 error_handler edn protocol ?request error respond)
-        ; request= (fun ?shutdown flow edn reqd protocol ->
-                request_handler db ?shutdown flow end reqd protocol) }
+        ; request= (fun flow edn reqd protocol ->
+                request_handler db flow end reqd protocol) }
     ]} *)
 
 val service :
@@ -251,7 +250,6 @@ type 'edn client_handler = {
     unit;
   response :
     'reqd 'headers 'request 'response 'ro 'wo.
-    ?shutdown:(unit -> unit) ->
     Mimic.flow ->
     'edn ->
     'response ->

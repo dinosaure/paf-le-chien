@@ -132,7 +132,6 @@ type ('flow, 'edn) server_handler = {
     unit;
   request :
     'reqd 'headers 'request 'response 'ro 'wo.
-    ?shutdown:(unit -> unit) ->
     'flow ->
     'edn ->
     'reqd ->
@@ -157,31 +156,21 @@ let service :
           handler.error edn (HTTP_1_1 http_1_1) ?request
             (error :> server_error)
             respond in
-        let rec request_handler' reqd =
-          Log.debug (fun m -> m "Shutdown the HTTP/1.1 (ALPN) connection.") ;
-          handler.request ?shutdown:(Some shutdown) flow edn reqd
-            (HTTP_1_1 http_1_1)
-        and conn =
-          lazy (Httpaf.Server_connection.create ~error_handler request_handler')
-        and shutdown () = Httpaf.Server_connection.shutdown (Lazy.force conn) in
+        let request_handler' reqd =
+          handler.request flow edn reqd (HTTP_1_1 http_1_1) in
+        let conn =
+          Httpaf.Server_connection.create ~error_handler request_handler' in
         Lwt.return_ok
-          ( flow,
-            Paf.Runtime ((module Httpaf.Server_connection), Lazy.force conn) )
+          (flow, Paf.Runtime ((module Httpaf.Server_connection), conn))
     | Some "h2" ->
         let edn = info.peer flow in
         let flow = info.injection flow in
         let error_handler ?request error respond =
           handler.error edn (H2 h2) ?request (error :> server_error) respond
         in
-        let rec request_handler' reqd =
-          handler.request ?shutdown:(Some shutdown) flow edn reqd (H2 h2)
-        and conn =
-          lazy (H2.Server_connection.create ~error_handler request_handler')
-        and shutdown () =
-          Log.debug (fun m -> m "Shutdown the H2 (ALPN) connection.") ;
-          H2.Server_connection.shutdown (Lazy.force conn) in
-        Lwt.return_ok
-          (flow, Paf.Runtime ((module H2.Server_connection), Lazy.force conn))
+        let request_handler' reqd = handler.request flow edn reqd (H2 h2) in
+        let conn = H2.Server_connection.create ~error_handler request_handler' in
+        Lwt.return_ok (flow, Paf.Runtime ((module H2.Server_connection), conn))
     | Some protocol ->
         Lwt.return_error (`Msg (Fmt.str "Invalid protocol %S." protocol)) in
   Paf.service connection connect accept close
@@ -214,7 +203,6 @@ type 'edn client_handler = {
     unit;
   response :
     'reqd 'headers 'request 'response 'ro 'wo.
-    ?shutdown:(unit -> unit) ->
     Mimic.flow ->
     'edn ->
     'response ->
@@ -234,38 +222,26 @@ let run ?alpn handler edn request flow =
   | (Some "h2" | None), `V2 request ->
       let error_handler error =
         handler.error edn (H2 h2) (to_client_error_v2 error) in
-      let rec response_handler response body =
-        handler.response ?shutdown:(Some shutdown) flow edn response body
-          (H2 h2)
-      and conn =
-        lazy
-          (H2.Client_connection.create ?config:None ?push_handler:None
-             ~error_handler)
-      and shutdown () = H2.Client_connection.shutdown (Lazy.force conn) in
+      let response_handler response body =
+        handler.response flow edn response body (H2 h2) in
+      let conn =
+        H2.Client_connection.create ?config:None ?push_handler:None
+          ~error_handler in
       let body =
-        H2.Client_connection.request (Lazy.force conn) request ~error_handler
+        H2.Client_connection.request conn request ~error_handler
           ~response_handler in
-      Lwt.async (fun () ->
-          Paf.run (module H2.Client_connection) (Lazy.force conn) flow) ;
-      Lwt.return_ok (Response_H2 (body, Lazy.force conn))
+      Lwt.async (fun () -> Paf.run (module H2.Client_connection) conn flow) ;
+      Lwt.return_ok (Response_H2 (body, conn))
   | (Some "http/1.1" | None), `V1 request ->
       let error_handler error =
         handler.error edn (HTTP_1_1 http_1_1) (to_client_error_v1 error) in
-      let rec response_handler response body =
-        handler.response ?shutdown:(Some shutdown) flow edn response body
-          (HTTP_1_1 http_1_1)
-      and body_and_conn =
-        lazy
-          (Httpaf.Client_connection.request request ~error_handler
-             ~response_handler)
-      and shutdown () =
-        Httpaf.Client_connection.shutdown (snd (Lazy.force body_and_conn)) in
-      Lwt.async (fun () ->
-          Paf.run
-            (module Httpaf_Client_connection)
-            (snd (Lazy.force body_and_conn))
-            flow) ;
-      Lwt.return_ok (Response_HTTP_1_1 (Lazy.force body_and_conn))
+      let response_handler response body =
+        handler.response flow edn response body (HTTP_1_1 http_1_1) in
+      let body, conn =
+        Httpaf.Client_connection.request request ~error_handler
+          ~response_handler in
+      Lwt.async (fun () -> Paf.run (module Httpaf_Client_connection) conn flow) ;
+      Lwt.return_ok (Response_HTTP_1_1 (body, conn))
   | Some protocol, _ ->
       Lwt.return_error
         (`Msg (Fmt.str "Invalid Application layer protocol: %S" protocol))
