@@ -197,7 +197,7 @@ end = struct
             Easy_flow.recv flow ~report_error ~report_closed:ignore
               ~read:(Runtime.read connection)
               ~read_eof:(Runtime.read_eof connection)
-            >>= fun _ -> go ()
+            >>= fun _ -> Lwt.pause () >>= go
         | `Yield ->
             Log.debug (fun m -> m "next read operation: `yield") ;
             Runtime.yield_reader connection rd_fiber ;
@@ -221,7 +221,7 @@ end = struct
             Log.debug (fun m -> m "next write operation: `write") ;
             Easy_flow.send ~report_error flow iovecs >>= fun res ->
             Runtime.report_write_result connection res ;
-            go ()
+            Lwt.pause () >>= go
         | `Yield ->
             Log.debug (fun m -> m "next write operation: `yield") ;
             Runtime.yield_writer connection wr_fiber ;
@@ -273,11 +273,11 @@ end = struct
             Easy_flow.recv flow ~report_error ~report_closed:ignore
               ~read:(Runtime.read connection)
               ~read_eof:(Runtime.read_eof connection)
-            >>= fun _ -> go ()
+            >>= fun _ -> Lwt.pause () >>= go
         | `Yield ->
             Log.debug (fun m -> m "next read operation: `yield") ;
             Runtime.yield_reader connection rd_fiber ;
-            Lwt.return_unit
+            Lwt.pause ()
         | `Close ->
             Log.debug (fun m -> m "next read operation: `close.") ;
             Lwt.wakeup_later notify_rd_exit () ;
@@ -296,11 +296,11 @@ end = struct
             Log.debug (fun m -> m "next write operation: `write.") ;
             Easy_flow.send ~report_error flow iovecs >>= fun res ->
             Runtime.report_write_result connection res ;
-            go ()
+            Lwt.pause () >>= go
         | `Yield ->
             Log.debug (fun m -> m "next write operation: `yield.") ;
             Runtime.yield_writer connection wr_fiber ;
-            Lwt.return ()
+            Lwt.pause ()
         | `Close _ ->
             Log.debug (fun m -> m "next write operation: `close.") ;
             Lwt.wakeup_later notify_wr_exit () ;
