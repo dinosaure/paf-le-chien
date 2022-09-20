@@ -24,20 +24,28 @@ let failwith fmt = Format.kasprintf (fun err -> Lwt.fail (Failure err)) fmt
 let src = Logs.Src.create "simple-client"
 
 module Log = (val Logs.src_log src : Logs.LOG)
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
+module P = Paf_mirage.Make (Tcpip_stack_socket.V4V6.TCP)
 open Lwt.Infix
 
 let ( >>? ) x f =
   x >>= function Ok x -> f x | Error err -> Lwt.return_error err
 
 let ( <.> ) f g x = f (g x)
+let apply v f = f v
 
-let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
-    Alpn.response -> Alpn.body -> unit =
- fun resp body ->
-  match (resp, body) with
-  | Alpn.Response_HTTP_2_0 _, _ -> failf "Invalid protocol H2"
-  | Alpn.Response_HTTP_1_1 response, Alpn.Body_HTTP_1_1 (Alpn.Rd, body) -> (
+let response_handler :
+    type reqd headers request response ro wo.
+    _ ->
+    f:(Httpaf.Response.t -> string -> unit Lwt.t) ->
+    Mimic.flow ->
+    (Ipaddr.t * int) option ->
+    response ->
+    ro ->
+    (reqd, headers, request, response, ro, wo) Alpn.protocol ->
+    unit =
+ fun th_err ~f _flow _edn response body -> function
+  | Alpn.H2 (module Reqd) -> failf "Invalid protocol H2"
+  | Alpn.HTTP_1_1 (module Reqd) -> (
       let buf = Buffer.create 0x100 in
       let th, wk = Lwt.wait () in
       let on_eof () =
@@ -53,11 +61,10 @@ let response_handler th_err ~(f : Httpaf.Response.t -> string -> unit Lwt.t) _ :
       | _ ->
           Httpaf.Body.close_reader body ;
           Lwt.return_unit)
-  | _ -> assert false
 
 let failf fmt = Format.kasprintf (fun err -> raise (Failure err)) fmt
 
-let error_handler wk _ (err : Alpn.client_error) =
+let error_handler wk _ _protocol err =
   Lwt.wakeup_later wk (err :> [ `Body of string | `Done | Alpn.client_error ]) ;
   match err with
   | `Invalid_response_body_length_v1 _ | `Invalid_response_body_length_v2 _ ->
@@ -65,6 +72,14 @@ let error_handler wk _ (err : Alpn.client_error) =
   | `Malformed_response _ -> failf "Malformed response"
   | `Exn exn -> raise exn
   | `Protocol_error (_error_code, _msg) -> failf "Protocol error"
+
+let client_handler th_err ~f wk =
+  {
+    Alpn.error = (fun edn protocol error -> error_handler wk edn protocol error);
+    Alpn.response =
+      (fun edn response body protocol ->
+        response_handler th_err ~f edn response body protocol);
+  }
 
 let anchors = []
 
@@ -125,8 +140,6 @@ let ctx =
          ~k:tls_connect)
   |> Mimic.(fold ipaddr Fun.[ req domain_name ] ~k:dns_resolve)
 
-let sleep v = Lwt_unix.sleep (Int64.to_float v)
-
 let run uri =
   let th, wk = Lwt.wait () in
   let f _ body =
@@ -159,7 +172,6 @@ let run uri =
       ~some:(fun hostname -> Httpaf.Headers.of_list [ ("Host", hostname) ])
       hostname in
   let request = Httpaf.Request.create ~headers `GET (Uri.path uri) in
-  let response_handler = response_handler th_err ~f in
   v >>= fun v ->
   let ctx = Mimic.add stack (Tcpip_stack_socket.V4V6.tcp v) ctx in
   (* XXX(dinosaure): we don't fill the [ctx] with [Paf_mirage.paf_transmission]
@@ -171,18 +183,16 @@ let run uri =
    * However, if we want to test an {i alpn} service, we must refactorize the code
    * above to automatically add [paf_transmission] as a proceeded information into
    * the [ctx] after a [Mimic.unfold]. *)
-  Paf_mirage.run ~sleep ~ctx ~error_handler:(error_handler wk_err)
-    ~response_handler (`V1 request)
+  Paf_mirage.run ~ctx (client_handler th_err ~f wk_err) (`V1 request)
   >>= function
   | Error err ->
       Log.err (fun m -> m "Got an error: %a." Mimic.pp_error err) ;
       Lwt.return_error err
-  | Ok (Alpn.Body_HTTP_2_0 _) -> Lwt.return_error (`Msg "Invalid protocol (H2)")
-  | Ok (Alpn.Body_HTTP_1_1 (Alpn.Wr, body)) -> (
+  | Ok (Alpn.Response_H2 _) -> Lwt.return_error (`Msg "Invalid protocol (H2)")
+  | Ok (Alpn.Response_HTTP_1_1 (body, _)) -> (
       Httpaf.Body.close_writer body ;
       Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
       | `Body body -> Lwt.return_ok body
       | _ ->
           Httpaf.Body.close_writer body ;
           Lwt.return_error (`Msg "Got an error while sending request"))
-  | _ -> assert false

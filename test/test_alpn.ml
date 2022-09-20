@@ -22,7 +22,7 @@ let () = Logs.set_reporter (reporter Fmt.stderr)
 let () = Logs.set_level ~all:true (Some Logs.Debug)
 let () = Mirage_crypto_rng_unix.initialize ()
 
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
+module P = Paf_mirage.Make (Tcpip_stack_socket.V4V6.TCP)
 
 let unix_stack () =
   Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
@@ -52,8 +52,6 @@ let tls =
         ()
   | _ -> invalid_arg "Invalid certificate or key"
 
-let error_handler _edn ?request:_ _err _respond = ()
-
 let alpn_of_tls_connection (_, flow) =
   match P.TLS.epoch flow with
   | Ok { Tls.Core.alpn_protocol; _ } ->
@@ -76,7 +74,7 @@ let port =
     incr v ;
     !v
 
-let service ~request_handler () =
+let service handler () =
   let info =
     {
       Alpn.alpn = alpn_of_tls_connection;
@@ -84,19 +82,46 @@ let service ~request_handler () =
       Alpn.injection;
     } in
   let handshake flow =
-    let edn = Tcpip_stack_socket.V4V6.TCP.dst flow in
+    let edn = P.TCP.dst flow in
     P.TLS.server_of_flow tls flow >>= function
     | Ok flow -> Lwt.return_ok (edn, flow)
     | Error err ->
         Lwt.return_error (`Msg (Fmt.str "%a" P.TLS.pp_write_error err))
   and close = P.close in
-  Alpn.service info ~error_handler ~request_handler handshake P.accept close
+  Alpn.service info handler handshake P.accept close
 
 module R = (val Mimic.repr P.tls_protocol)
 
-let error_handler () _resp = ()
+type version = HTTP_1_1 | HTTP_2_0
 
-let client ~ctx ~response_handler req =
+let error_handler _ _protocol ?request:_ _error _response = ()
+
+let request_handler :
+    type reqd headers request response ro wo.
+    _ ->
+    _ ->
+    _ ->
+    _ ->
+    reqd ->
+    (reqd, headers, request, response, ro, wo) Alpn.protocol ->
+    unit =
+ fun wk_request wk _flow _edn _reqd -> function
+  | Alpn.HTTP_1_1 (module Reqd) ->
+      Lwt.wakeup_later wk_request HTTP_1_1 ;
+      Lwt.wakeup_later wk ()
+  | Alpn.H2 (module Reqd) ->
+      Lwt.wakeup_later wk_request HTTP_2_0 ;
+      Lwt.wakeup_later wk ()
+
+let server_handler wk_request wk =
+  {
+    Alpn.error = error_handler;
+    Alpn.request =
+      (fun flow edn reqd protocol ->
+        request_handler wk_request wk flow edn reqd protocol);
+  }
+
+let client ~ctx handler req =
   Mimic.resolve ctx >>= function
   | Error err -> Alcotest.failf "%a" Mimic.pp_error err
   | Ok (R.T v as flow) -> (
@@ -104,14 +129,11 @@ let client ~ctx ~response_handler req =
         match P.TLS.epoch v with
         | Ok { Tls.Core.alpn_protocol; _ } -> alpn_protocol
         | Error _ -> None in
-      Alpn.run ~sleep:Time.sleep_ns ?alpn ~error_handler ~response_handler ()
-        req flow
-      >>= function
+      Alpn.run ?alpn handler () req flow >>= function
       | Ok body -> Lwt.return body
       | Error err -> Alcotest.failf "%a" Mimic.pp_error err)
   | Ok flow -> (
-      Alpn.run ~sleep:Time.sleep_ns ~error_handler ~response_handler () req flow
-      >>= function
+      Alpn.run handler () req flow >>= function
       | Ok body -> Lwt.return body
       | Error err -> Alcotest.failf "%a" Mimic.pp_error err)
 
@@ -120,8 +142,13 @@ let ctx_with_tls stack ~port tls =
   Mimic.add P.tls_edn (None, tls, stack, ipaddr, port) Mimic.empty
 
 let authenticator ?ip:_ ~host:_ _ = Ok None
+let apply v f = f v
 
-type version = HTTP_1_1 | HTTP_2_0
+let fake_client_handler =
+  {
+    Alpn.error = (fun _ _protocol _error -> ());
+    Alpn.response = (fun _flow _edn _response _body _protocol -> ());
+  }
 
 let test01 =
   Alcotest_lwt.test_case "http/1.1" `Quick @@ fun _sw () ->
@@ -129,15 +156,7 @@ let test01 =
   let stop = Lwt_switch.create () in
   let th, wk = Lwt.wait () in
   let request, wk_request = Lwt.wait () in
-  let request_handler _edn : Alpn.reqd -> unit = function
-    | Alpn.Reqd_HTTP_1_1 _reqd ->
-        Lwt.wakeup_later wk_request HTTP_1_1 ;
-        Lwt.wakeup_later wk ()
-    | Alpn.Reqd_HTTP_2_0 _reqd ->
-        Lwt.wakeup_later wk_request HTTP_2_0 ;
-        Lwt.wakeup_later wk () in
-  let response_handler () : Alpn.response -> Alpn.body -> unit = fun _ _ -> () in
-  let service = service ~request_handler () in
+  let service = service (server_handler wk_request wk) () in
   let tls = Tls.Config.client ~authenticator ~alpn_protocols:[ "http/1.1" ] () in
   let req = `V1 (Httpaf.Request.create `GET "/") in
   Lwt.both
@@ -145,22 +164,21 @@ let test01 =
       P.init ~port stack >>= fun t ->
       P.serve ~stop service t |> fun (`Initialized th) ->
       let ctx = ctx_with_tls stack ~port tls in
-      Lwt.both (client ~ctx ~response_handler req) th )
+      Lwt.both (client ~ctx fake_client_handler req) th )
     (th >>= fun () -> Lwt_switch.turn_off stop)
   >>= fun ((body, ()), ()) ->
   request >>= fun request ->
   match (request, body) with
-  | HTTP_1_1, Alpn.Body_HTTP_1_1 _ ->
+  | HTTP_1_1, Alpn.Response_HTTP_1_1 _ ->
       Alcotest.(check pass) "http/1.1" () () ;
       Lwt.return_unit
   | _ -> Alcotest.failf "Unexpected version of HTTP"
 
 let close_body = function
-  | Alpn.Body_HTTP_1_1 (_cap, _body) as body -> body
-  | Alpn.Body_HTTP_2_0 (_cap, Wr body) as v ->
+  | Alpn.Response_HTTP_1_1 _ as response -> response
+  | Alpn.Response_H2 (body, _) as response ->
       H2.Body.Writer.close body ;
-      v
-  | Alpn.Body_HTTP_2_0 (_cap, Rd _body) as body -> body
+      response
 
 let test02 =
   Alcotest_lwt.test_case "h2" `Quick @@ fun _sw () ->
@@ -168,15 +186,7 @@ let test02 =
   let stop = Lwt_switch.create () in
   let th, wk = Lwt.wait () in
   let request, wk_request = Lwt.wait () in
-  let request_handler _edn : Alpn.reqd -> unit = function
-    | Alpn.Reqd_HTTP_1_1 _ ->
-        Lwt.wakeup_later wk_request HTTP_1_1 ;
-        Lwt.wakeup_later wk ()
-    | Alpn.Reqd_HTTP_2_0 _reqd ->
-        Lwt.wakeup_later wk_request HTTP_2_0 ;
-        Lwt.wakeup_later wk () in
-  let response_handler () : Alpn.response -> Alpn.body -> unit = fun _ _ -> () in
-  let service = service ~request_handler () in
+  let service = service (server_handler wk_request wk) () in
   let tls = Tls.Config.client ~authenticator ~alpn_protocols:[ "h2" ] () in
   let req = `V2 (H2.Request.create ~scheme:"https" `GET "/") in
   Lwt.both
@@ -184,12 +194,12 @@ let test02 =
       P.init ~port stack >>= fun t ->
       P.serve ~stop service t |> fun (`Initialized th) ->
       let ctx = ctx_with_tls stack ~port tls in
-      Lwt.both (client ~ctx ~response_handler req >|= close_body) th )
+      Lwt.both (client ~ctx fake_client_handler req >|= close_body) th )
     (th >>= fun () -> Lwt_switch.turn_off stop)
   >>= fun ((body, ()), ()) ->
   request >>= fun request ->
   match (request, body) with
-  | HTTP_2_0, Alpn.Body_HTTP_2_0 _ ->
+  | HTTP_2_0, Alpn.Response_H2 _ ->
       Alcotest.(check pass) "h2" () () ;
       Lwt.return_unit
   | _ -> Alcotest.failf "Unexpected version of HTTP"

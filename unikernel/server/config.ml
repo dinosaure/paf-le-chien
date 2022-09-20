@@ -1,78 +1,50 @@
 open Mirage
 
-type paf_server = Paf_server
+let ports =
+  let doc = Key.Arg.info ~doc:"Port of HTTP & HTTPS service." [ "p"; "ports" ] in
+  Key.(create "ports" Arg.(opt (pair int int) (8080, 4343) doc))
 
-let paf_server = Type.v Paf_server
+let tls =
+  let doc = Key.Arg.info ~doc:"Start an HTTP server with a TLS certificate." [ "tls" ] in
+  Key.(create "tls" Arg.(flag doc))
 
-let paf ~port =
-  let packages = [ package ~min:"0.0.8" "paf" ~sublibs:[ "mirage" ] ] in
-  let keys = [ Key.v port ] in
-  let connect _ modname = function
-    | [ _time; tcpv4v6; ] ->
-      Fmt.str "%s.init ~port:%a %s" modname Key.serialize_call (Key.v port) tcpv4v6
-    | _ -> assert false in
-  impl ~packages ~keys ~connect "Paf_mirage.Make"
-    (time @-> tcpv4v6 @-> paf_server)
+let alpn =
+  let doc = Key.Arg.info ~doc:"Protocols handled by the HTTP server." [ "alpn" ] in
+  Key.(create "alpn" Arg.(opt (some string) None doc))
 
-let tcpv4v6_of_stackv4v6 =
-  let connect _ modname = function
-    | [ stackv4v6 ] -> Fmt.str {ocaml|%s.connect %s|ocaml} modname stackv4v6
-    | _ -> assert false in
-  impl ~connect "Paf_mirage.TCPV4V6" (stackv4v6 @-> tcpv4v6)
-
-let tcpv4v6_of_stackv4v6 stackv4v6 = tcpv4v6_of_stackv4v6 $ stackv4v6
-
-let paf ~port ?(time= default_time) tcpv4v6 = paf ~port $ time $ tcpv4v6
-
-let port =
-  let doc = Key.Arg.info ~doc:"port of HTTP service." [ "p"; "port" ] in
-  Key.(create "port" Arg.(opt int 8080 doc))
-
-let email =
-  let doc = Key.Arg.info ~doc:"Let's encrypt email." [ "email" ] in
-  Key.(create "email" Arg.(opt (some string) None doc))
-
-let hostname =
-  let doc = Key.Arg.info ~doc:"Hostname of the unikernel." [ "hostname" ] in
-  Key.(create "hostname" Arg.(opt (some string) None doc))
-
-let cert_seed =
-  let doc = Key.Arg.info ~doc:"Let's encrypt certificate seed." [ "cert-seed" ] in
-  Key.(create "cert_seed" Arg.(opt (some string) None doc))
-
-let account_seed =
-  let doc = Key.Arg.info ~doc:"Let's encrypt account seed." [ "account-seed" ] in
-  Key.(create "account_seed" Arg.(opt (some string) None doc))
-
-let production =
-  let doc = Key.Arg.info ~doc:"Let's encrypt production environment." [ "production" ] in
-  Key.(create "production" Arg.(opt bool false doc))
-
-let https =
-  let doc = Key.Arg.info ~doc:"Start an HTTP server with a TLS certificate." [ "https" ] in
-  Key.(create "https" Arg.(flag doc))
+type conn = Connect
+let conn = typ Connect
 
 let minipaf =
   foreign "Unikernel.Make"
-    ~keys:[ Key.v email
-          ; Key.v hostname
-          ; Key.v cert_seed
-          ; Key.v account_seed
-          ; Key.v production
-          ; Key.v https ]
-    ~packages:[ package "ca-certs-nss"
-              ; package "dns-client" ~min:"6.1.0" ~sublibs:[ "mirage" ]
-              ; package "paf-le" ~min:"0.0.8"
-              ; package "rock" ]
-    (console @-> random @-> time @-> mclock @-> pclock @-> stackv4v6 @-> paf_server @-> job)
+    ~packages:[ package "paf" ~sublibs:[ "mirage" ]
+              ; package "digestif"
+              ; package "mimic-happy-eyeballs"
+              ; package "hxd" ~sublibs:[ "core"; "string" ]
+              ; package "base64" ~sublibs:[ "rfc2045" ] ]
+    ~keys:[ Key.v ports
+          ; Key.v tls
+          ; Key.v alpn ]
+    (random @-> kv_ro @-> kv_ro @-> tcpv4v6 @-> conn @-> job)
 
-let random = default_random
-let console = default_console
-let time = default_time
-let pclock = default_posix_clock
-let mclock = default_monotonic_clock
+let conn =
+  let connect _ modname = function
+    | [ _pclock; _tcpv4v6; ctx ] ->
+      Fmt.str {ocaml|%s.connect %s|ocaml} modname ctx
+    | _ -> assert false in
+  impl ~connect "Connect.Make"
+    (pclock @-> tcpv4v6 @-> git_client @-> conn)
+
 let stackv4v6 = generic_stackv4v6 default_network
+let tcpv4v6 = tcpv4v6_of_stackv4v6 stackv4v6
+let dns = generic_dns_client stackv4v6
+let certificates = crunch "certificates"
+let keys = crunch "keys"
+
+let conn =
+  let happy_eyeballs = git_happy_eyeballs stackv4v6 dns
+    (generic_happy_eyeballs stackv4v6 dns) in
+  conn $ default_posix_clock $ tcpv4v6 $ happy_eyeballs
 
 let () = register "minipaf"
-  [ minipaf $ console $ random $ time $ mclock $ pclock $ stackv4v6
-            $ paf ~port (tcpv4v6_of_stackv4v6 stackv4v6) ]
+  [ minipaf $ default_random $ certificates $ keys $ tcpv4v6 $ conn ]

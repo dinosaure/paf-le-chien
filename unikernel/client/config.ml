@@ -1,55 +1,36 @@
 open Mirage
 
-type paf = Paf
-let paf = typ Paf
-
-let paf_conf () =
-  let packages = [ package "paf" ~sublibs:[ "mirage" ] ] in
-  impl @@ object
-    inherit base_configurable
-    method ty = time @-> stackv4v6 @-> paf
-    method module_name = "Paf_mirage.Make"
-    method! packages = Key.pure packages
-    method name = "paf"
-  end
-
-type dns = Dns
-let dns = typ Dns
-
-let dns_conf () =
-  let packages = [ package "dns-client" ~min:"6.1.0" ~sublibs:[ "mirage" ] ] in
-  impl @@ object
-    inherit base_configurable
-    method ty = random @-> time @-> mclock @-> pclock @-> stackv4v6 @-> dns
-    method module_name = "Dns_client_mirage.Make"
-    method! packages = Key.pure packages
-    method name = "dns"
-    method! connect _ modname = function
-      | [ _random; _time; _mclock; _pclock; stackv4v6; ] ->
-        Fmt.str {ocaml|Lwt.return (%s.create %s)|ocaml} modname stackv4v6
-      | _ -> assert false
-  end
-
 let uri =
-  let doc = Key.Arg.info ~doc:"URI" [ "u"; "uri" ] in
+  let doc = Key.Arg.info ~doc:"URI to fetch." [ "uri" ] in
   Key.(create "uri" Arg.(required string doc))
+
+type http_client = HTTP_client
+let http_client = typ HTTP_client
 
 let minipaf =
   foreign "Unikernel.Make"
-    ~keys:[ Key.abstract uri ]
-    ~packages:[ package "paf-cohttp" ~min:"0.0.7"
-              ; package "ca-certs-nss" ]
-    (console @-> time @-> pclock @-> stackv4v6 @-> dns @-> paf @-> job)
+    ~keys:[ Key.v uri; ]
+    ~packages:[ package "paf"
+              ; package "h2"
+              ; package "hxd" ~sublibs:[ "core"; "string" ]
+              ; package "httpaf" ]
+    (console @-> time @-> http_client @-> job)
 
-let paf time stackv4v6 = paf_conf () $ time $ stackv4v6
-let dns random time mclock pclock stackv4v6 = dns_conf () $ random $ time $ mclock $ pclock $ stackv4v6
+let stack = generic_stackv4v6 default_network
+let dns = generic_dns_client stack
+let tcp = tcpv4v6_of_stackv4v6 stack
 
-let random = default_random
-let console = default_console
-let time = default_time
-let pclock = default_posix_clock
-let mclock = default_monotonic_clock
-let stackv4v6 = generic_stackv4v6 default_network
-let dns = dns random time mclock pclock stackv4v6
+let http_client =
+  let connect _ modname = function
+    | [ _pclock; _tcpv4v6; ctx ] ->
+      Fmt.str {ocaml|%s.connect %s|ocaml} modname ctx
+    | _ -> assert false in
+  impl ~connect "Http_mirage_client.Make"
+    (pclock @-> tcpv4v6 @-> git_client @-> http_client)
 
-let () = register "minipaf" [ minipaf $ console $ time $ pclock $ stackv4v6 $ dns $ paf time stackv4v6 ]
+let http_client =
+  let happy_eyeballs = git_happy_eyeballs stack dns (generic_happy_eyeballs stack dns) in
+  http_client $ default_posix_clock $ tcp $ happy_eyeballs
+
+let () = register "minipaf"
+    [ minipaf $ default_console $ default_time $ http_client ]

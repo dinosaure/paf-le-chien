@@ -15,18 +15,52 @@ module type S = sig
       We expose these protocols in the sense of [mimic]. They are registered
       globally with [mimic] and are usable {i via} [mimic] (see
       {!Mimic.resolve}) as long as the given [ctx] contains {!val:tcp_edn}
-      and/or {!val:tls_edn}.
+      and/or {!val:tls_edn}. Such way to instance {i something} which represents
+      these protocols and usable as a {!Mirage_flow.S} are useful for the
+      client-side, see {!val:run}.
 
-      Such way to instance {i something} which represents these protocols and
-      usable as a {!Mirage_flow.S} are useful for the client-side, see {!run}. *)
+      We expose 2 new functions: [no_close]/[to_close]. In a specific context
+      such as the proxy, the handler should notify us to fakely close the
+      underlying connection. Indeed, [Paf] will try to close your connection as
+      soon as the HTTP transmission is finished. However, in the case of a
+      proxy, the connection must remains then. {!val:TCP.no_close} sets the
+      [flow] so that the next call to {!val:TCP.close} is ignored.
+      {!val:to_close} resets the [flow] to the basic behavior - we will really
+      close the given [flow]. *)
 
   module TCP : sig
     include Mirage_flow.S
 
     val dst : flow -> ipaddr * int
+    val no_close : flow -> unit
+    val to_close : flow -> unit
   end
 
-  module TLS : module type of Tls_mirage.Make (TCP)
+  module TLS : sig
+    type error =
+      [ `Tls_alert of Tls.Packet.alert_type
+      | `Tls_failure of Tls.Engine.failure
+      | `Read of TCP.error
+      | `Write of TCP.write_error ]
+
+    type write_error = [ `Closed | error ]
+
+    include
+      Mirage_flow.S with type error := error and type write_error := write_error
+
+    val no_close : flow -> unit
+    val to_close : flow -> unit
+    val epoch : flow -> (Tls.Core.epoch_data, unit) result
+
+    val server_of_flow :
+      Tls.Config.server -> TCP.flow -> (flow, write_error) result Lwt.t
+
+    val client_of_flow :
+      Tls.Config.client ->
+      ?host:[ `host ] Domain_name.t ->
+      TCP.flow ->
+      (flow, write_error) result Lwt.t
+  end
 
   val tcp_protocol : (stack * ipaddr * int, TCP.flow) Mimic.protocol
   val tcp_edn : (stack * ipaddr * int) Mimic.value
@@ -99,25 +133,19 @@ module type S = sig
       - HTTP/1.1 requests
       - and H2 requests
 
-      The choice is made by the ALPN challende on the TLS layer where the client
+      The choice is made by the ALPN challenge on the TLS layer where the client
       can send which protocol he/she wants to use. Therefore, the server must
       handle these two cases. *)
 
   val alpn_service :
     tls:Tls.Config.server ->
     ?config:Httpaf.Config.t * H2.Config.t ->
-    error_handler:
-      (dst ->
-      ?request:Alpn.request ->
-      Alpn.server_error ->
-      (Alpn.headers -> Alpn.body) ->
-      unit) ->
-    (dst -> Alpn.reqd -> unit) ->
+    (TLS.flow, dst) Alpn.server_handler ->
     t Paf.service
-  (** [alpn_service ~tls ~error_handler request_handler] makes an H2/HTTP/AF
-      service over TLS (from the given TLS configuration). An HTTP request
-      (version 1.1 or 2) is handled then by [request_handler]. The returned
-      service is not yet launched (see {!server}). *)
+  (** [alpn_service ~tls handler] makes an H2/HTTP/AF service over TLS (from the
+      given TLS configuration). An HTTP request (version 1.1 or 2) is handled
+      then by [handler]. The returned service is not yet launched (see
+      {!val:serve} to launch it). *)
 
   val serve :
     ?stop:Lwt_switch.t -> 't Paf.service -> 't -> [ `Initialized of unit Lwt.t ]
@@ -125,11 +153,8 @@ module type S = sig
       [service]. [stop] can be used to stop the service. *)
 end
 
-module Make (Time : Mirage_time.S) (Stack : Tcpip.Tcp.S) :
-  S
-    with type stack = Stack.t
-     and type TCP.flow = Stack.flow
-     and type ipaddr = Stack.ipaddr
+module Make (Stack : Tcpip.Tcp.S) :
+  S with type stack = Stack.t and type ipaddr = Stack.ipaddr
 
 (** {2 Client implementation.}
 
@@ -144,24 +169,12 @@ type transmission = [ `Clear | `TLS of string option ]
 val paf_transmission : transmission Mimic.value
 
 val run :
-  sleep:Paf.sleep ->
   ctx:Mimic.ctx ->
-  error_handler:(Mimic.flow -> Alpn.client_error -> unit) ->
-  response_handler:(Mimic.flow -> Alpn.response -> Alpn.body -> unit) ->
+  (Ipaddr.t * int) option Alpn.client_handler ->
   [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
-  (Alpn.body, [> Mimic.error ]) result Lwt.t
-(** [run ~ctx ~error_handler ~response_handler req] sends an HTTP request (H2 or
-    HTTP/1.1) to a peer which can be reached {i via} the given Mimic's [ctx]. If
-    the connection is recognized as a {!tls_protocol}, we proceed an ALPN
-    challenge between what the user chosen and what the peer can handle.
-    Otherwise, we send a simple HTTP/1.1 request or a [h2c] request. *)
-
-module TCPV4V6 (Stack : Tcpip.Stack.V4V6) : sig
-  include
-    Tcpip.Tcp.S
-      with type t = Stack.TCP.t
-       and type ipaddr = Ipaddr.t
-       and type flow = Stack.TCP.flow
-
-  val connect : Stack.t -> t Lwt.t
-end
+  (Alpn.alpn_response, [> Mimic.error ]) result Lwt.t
+(** [run ~ctx handler req] sends an HTTP request (H2 or HTTP/1.1) to a peer
+    which can be reached {i via} the given Mimic's [ctx]. If the connection is
+    recognized as a {!tls_protocol}, we proceed an ALPN challenge between what
+    the user chosen and what the peer can handle. Otherwise, we send a simple
+    HTTP/1.1 request or a [h2c] request. *)

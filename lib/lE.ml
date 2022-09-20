@@ -17,7 +17,6 @@ let scheme = Mimic.make ~name:"paf-le-scheme"
 let port = Mimic.make ~name:"paf-le-port"
 let domain_name = Mimic.make ~name:"paf-le-domain-name"
 let ipaddr = Mimic.make ~name:"paf-le-ipaddr"
-let sleep = Mimic.make ~name:"paf-le-sleep"
 
 module Httpaf_Client_connection = struct
   include Httpaf.Client_connection
@@ -164,11 +163,6 @@ struct
   let call ?(ctx = Mimic.empty) ?(headers = Httpaf.Headers.empty)
       ?(body = `Empty) ?chunked (meth : [ `GET | `HEAD | `POST ]) uri =
     let ctx = with_uri uri ctx in
-    let sleep =
-      match Mimic.get sleep ctx with
-      | Some sleep -> sleep
-      | None -> fun _ -> Lwt.return_unit
-      (* TODO *) in
     let headers = with_host headers uri in
     let headers = with_transfer_encoding ~chunked meth body headers in
     let req =
@@ -189,7 +183,7 @@ struct
           Httpaf.Client_connection.request ~error_handler ~response_handler req
         in
         Lwt.async (fun () ->
-            Paf.run ~sleep (module Httpaf_Client_connection) conn flow) ;
+            Paf.run (module Httpaf_Client_connection) conn flow) ;
         transmit body httpaf_body ;
         Lwt.pick
           [
@@ -384,7 +378,6 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     let tls = Mimic.make ~name:"letsencrypt-tls" in
 
     Mimic.empty
-    |> Mimic.add sleep Time.sleep_ns
     |> Mimic.add stack (Stack.tcp stackv4v6)
     |> Mimic.fold tcp_edn
          Fun.[ req scheme; req stack; req ipaddr; dft port 80 ]

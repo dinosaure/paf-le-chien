@@ -1,6 +1,7 @@
 open Lwt.Infix
 
 let ( <.> ) f g x = f (g x)
+let apply v f = f v
 
 let reporter ppf =
   let report src level ~over k msgf =
@@ -21,7 +22,7 @@ let () = Logs.set_reporter (reporter Fmt.stderr)
 let () = Logs.set_level ~all:true (Some Logs.Debug)
 let () = Mirage_crypto_rng_unix.initialize ()
 
-module P = Paf_mirage.Make (Time) (Tcpip_stack_socket.V4V6.TCP)
+module P = Paf_mirage.Make (Tcpip_stack_socket.V4V6.TCP)
 
 let unix_stack () =
   Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
@@ -159,18 +160,15 @@ let request_handler (ip, port) reqd =
       let resp = Response.create ~headers `OK in
       Reqd.respond_with_string reqd resp contents ;
       Lwt.async @@ fun () ->
-      body_to_string body >>= fun _ ->
-      Logs.debug (fun m -> m "Body drained.") ;
-      Lwt.return_unit
+      body_to_string body >|= fun _ -> Logs.debug (fun m -> m "Body drained.")
   | "/repeat" ->
       Lwt.async @@ fun () ->
-      body_to_string body >>= fun str ->
+      body_to_string body >|= fun str ->
       let headers =
         Headers.of_list
           [ ("content-length", string_of_int (String.length str)) ] in
       let resp = Response.create ~headers `OK in
-      Reqd.respond_with_string reqd resp str ;
-      Lwt.return_unit
+      Reqd.respond_with_string reqd resp str
   | target ->
   match Astring.String.cut ~sep:"?" target with
   | Some ("/query", query) ->
