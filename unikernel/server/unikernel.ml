@@ -47,7 +47,7 @@ module Make
     | [ certchain ] -> Lwt.return_ok (`Single certchain)
     | certchains -> Lwt.return_ok (`Multiple certchains)
 
-  let http_1_1_request_handler ~ctx ~authenticator ?shutdown:_ flow _edn =
+  let http_1_1_request_handler ~ctx ~authenticator flow _edn =
     let module R = (val (Mimic.repr Paf.tcp_protocol)) in
     fun reqd ->
       match (Httpaf.Reqd.request reqd).Httpaf.Request.meth with
@@ -66,8 +66,8 @@ module Make
       | R.T flow -> Paf.TLS.to_close flow
       | _ -> () in
     { Alpn.error= Server.alpn_error_handler
-    ; Alpn.request= (fun ?shutdown flow edn reqd protocol ->
-      Server.alpn_request_handler ~ctx ~authenticator ~to_close ?shutdown (R.T flow) edn reqd protocol) }
+    ; Alpn.request= (fun flow edn reqd protocol ->
+      Server.alpn_request_handler ~ctx ~authenticator ~to_close (R.T flow) edn reqd protocol) }
 
   let run_with_tls ~ctx ~authenticator ~tls (http_port, https_port) tcpv4v6 =
     let alpn_service = Paf.alpn_service ~tls (alpn_handler ~ctx ~authenticator) in

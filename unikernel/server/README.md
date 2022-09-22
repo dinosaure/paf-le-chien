@@ -49,9 +49,3 @@ $ mirage build
 $ ./dist/minipaf --tls
 ...
 ```
-
-### Issues
-
-Some issues persists on H2 but they already signaled to the
-[ocaml-h2][ocaml-h2] maintainer. We suggest to use http/1.1 protocol or help us
-to fix these issues.

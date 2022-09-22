@@ -395,8 +395,7 @@ let http_2_0_request_handler ~ctx ~authenticator ~to_close =
       let content_type = H2.Headers.get request.H2.Request.headers "content-type" in
       let content_type = Option.value ~default:"application/octet-stream" content_type in
       let headers = H2.Headers.of_list
-        [ "transfer-encoding", "chunked"
-        ; "content-type", content_type ] in     
+        [ "content-type", content_type ] in     
       let response = H2.Response.create ~headers `OK in
       let src = H2.Reqd.request_body reqd in
       let dst = H2.Reqd.respond_with_streaming reqd response in
@@ -410,8 +409,7 @@ let http_2_0_request_handler ~ctx ~authenticator ~to_close =
         let length = Int64.of_string v in
         let g = Option.bind (H2.Headers.get request.H2.Request.headers "x-seed") random_state_of_seed in
         let headers = H2.Headers.of_list
-          [ "content-type", "text/plain"
-          ; "transfer-encoding", "chunked" ] in
+          [ "content-type", "text/plain" ] in
         let response = H2.Response.create ~headers `OK in
         let body = H2.Reqd.respond_with_streaming reqd response in
         transmit_random
