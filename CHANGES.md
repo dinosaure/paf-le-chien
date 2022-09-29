@@ -1,3 +1,10 @@
+### 0.2.0 (2022-09-29) Paris - France
+
+- Fix several issues about h2 protocols (@dinosaure, #70)
+- Delete the `Time` device (@dinosaure, @hannesm, #70)
+- Upgrade the distribution with the new interface of `Alpn` module and `Paf_mirage` (@dinosaure, #70)
+- Update unikernels (@dinosaure, #70)
+
 ### 0.1.0 (2022-08-28) Paris - France
 
 - Fix the Let's encrypt support (@dinosaure, #65)
