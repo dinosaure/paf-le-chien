@@ -261,7 +261,7 @@ module Make (Stack : Tcpip.Tcp.S) :
            * that the bound socket is closed but the socket with the peer is
            * closed. *)
           Log.err (fun m -> m "The connection was closed by peer.") ;
-          Lwt.return_error (`Write `Closed)
+          TCP.close tcp_flow >>= fun () -> Lwt.return_error `Closed
       | Error err ->
           Log.err (fun m -> m "Got a TLS error: %a." TLS.pp_write_error err) ;
           TCP.close tcp_flow >>= fun () -> Lwt.return_error err in
