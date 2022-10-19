@@ -26,6 +26,14 @@ module type S = sig
     val to_close : flow -> unit
     val epoch : flow -> (Tls.Core.epoch_data, unit) result
 
+    val reneg :
+      ?authenticator:X509.Authenticator.t ->
+      ?acceptable_cas:X509.Distinguished_name.t list ->
+      ?cert:Tls.Config.own_cert ->
+      ?drop:bool ->
+      flow ->
+      (unit, write_error) result Lwt.t
+
     val server_of_flow :
       Tls.Config.server -> TCP.flow -> (flow, write_error) result Lwt.t
 
@@ -162,6 +170,9 @@ module Make (Stack : Tcpip.Tcp.S) :
     let write (_, tls_flow) = write tls_flow
     let writev (_, tls_flow) = writev tls_flow
     let epoch (_, tls_flow) = epoch tls_flow
+
+    let reneg ?authenticator ?acceptable_cas ?cert ?drop (_, tls_flow) =
+      reneg ?authenticator ?acceptable_cas ?cert ?drop tls_flow
 
     let server_of_flow config tcp_flow =
       Lwt_result.Infix.(
