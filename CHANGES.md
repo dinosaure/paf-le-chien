@@ -1,3 +1,8 @@
+### 0.3.0 (2022-10-19) Paris - France
+
+- Fix a file-descriptor leak when we fail on the TLS handshake (#72, @TheLortex, @dinosaure, @hannesm)
+- Add `reneg` function into `Paf_mirage.Make.TLS` (#73, @dinosaure)
+
 ### 0.2.0 (2022-09-29) Paris - France
 
 - Fix several issues about h2 protocols (@dinosaure, #70)
