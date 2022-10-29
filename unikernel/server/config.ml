@@ -1,12 +1,16 @@
 open Mirage
 
-let ports =
-  let doc = Key.Arg.info ~doc:"Port of HTTP & HTTPS service." [ "p"; "ports" ] in
-  Key.(create "ports" Arg.(opt (pair int int) (8080, 4343) doc))
+let port =
+  let doc = Key.Arg.info ~doc:"Port of HTTP service." [ "p"; "port" ] in
+  Key.(create "ports" Arg.(opt int 8080 doc))
 
 let tls =
   let doc = Key.Arg.info ~doc:"Start an HTTP server with a TLS certificate." [ "tls" ] in
   Key.(create "tls" Arg.(flag doc))
+
+let tls_port =
+  let doc = Key.Arg.info ~doc:"Port of HTTPS service." [ "tls-port" ] in
+  Key.(create "tls-port" Arg.(opt int 4343 doc))
 
 let alpn =
   let doc = Key.Arg.info ~doc:"Protocols handled by the HTTP server." [ "alpn" ] in
@@ -17,15 +21,15 @@ let conn = typ Connect
 
 let minipaf =
   foreign "Unikernel.Make"
-    ~packages:[ package "paf" ~sublibs:[ "mirage" ]
-              ; package "digestif"
+    ~packages:[ package "digestif"
               ; package "mimic-happy-eyeballs"
+              ; package "rresult"
               ; package "hxd" ~sublibs:[ "core"; "string" ]
               ; package "base64" ~sublibs:[ "rfc2045" ] ]
-    ~keys:[ Key.v ports
+    ~keys:[ Key.v tls_port
           ; Key.v tls
           ; Key.v alpn ]
-    (random @-> kv_ro @-> kv_ro @-> tcpv4v6 @-> conn @-> job)
+    (random @-> kv_ro @-> kv_ro @-> tcpv4v6 @-> conn @-> http_server @-> job)
 
 let conn =
   let connect _ modname = function
@@ -46,5 +50,7 @@ let conn =
     (generic_happy_eyeballs stackv4v6 dns) in
   conn $ default_posix_clock $ tcpv4v6 $ happy_eyeballs
 
+let http_server = paf_server ~port tcpv4v6
+
 let () = register "minipaf"
-  [ minipaf $ default_random $ certificates $ keys $ tcpv4v6 $ conn ]
+  [ minipaf $ default_random $ certificates $ keys $ tcpv4v6 $ conn $ http_server ]

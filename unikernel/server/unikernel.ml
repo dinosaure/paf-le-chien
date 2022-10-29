@@ -9,8 +9,8 @@ module Make
   (Certificate : Mirage_kv.RO)
   (Key : Mirage_kv.RO)
   (Tcp : Tcpip.Tcp.S with type ipaddr = Ipaddr.t)
-  (Connect : Connect.S) = struct
-  module Paf = Paf_mirage.Make (Tcp)
+  (Connect : Connect.S)
+  (HTTP_Server : Paf_mirage.S) = struct
 
   let tls key_ro certificate_ro =
     let open Lwt_result.Infix in
@@ -52,54 +52,55 @@ module Make
     | certchains -> Lwt.return_ok (`Multiple certchains)
 
   let http_1_1_request_handler ~ctx ~authenticator flow _edn =
-    let module R = (val (Mimic.repr Paf.tcp_protocol)) in
+    let module R = (val (Mimic.repr HTTP_Server.tcp_protocol)) in
     fun reqd ->
       match (Httpaf.Reqd.request reqd).Httpaf.Request.meth with
       | `CONNECT ->
-        Paf.TCP.no_close flow ;
+        HTTP_Server.TCP.no_close flow ;
         let to_close = function
-          | R.T flow -> Paf.TCP.to_close flow
+          | R.T flow -> HTTP_Server.TCP.to_close flow
           | _ -> () in
         Server.http_1_1_request_handler ~ctx ~authenticator ~to_close (R.T flow) reqd
       | _ ->
         Server.http_1_1_request_handler ~ctx ~authenticator ~to_close:(always ()) (R.T flow) reqd
 
   let alpn_handler ~ctx ~authenticator =
-    let module R = (val (Mimic.repr Paf.tls_protocol)) in
+    let module R = (val (Mimic.repr HTTP_Server.tls_protocol)) in
     let to_close = function
-      | R.T flow -> Paf.TLS.to_close flow
+      | R.T flow -> HTTP_Server.TLS.to_close flow
       | _ -> () in
     { Alpn.error= Server.alpn_error_handler
     ; Alpn.request= (fun flow edn reqd protocol ->
       Server.alpn_request_handler ~ctx ~authenticator ~to_close (R.T flow) edn reqd protocol) }
 
-  let run_with_tls ~ctx ~authenticator ~tls (http_port, https_port) tcpv4v6 =
-    let alpn_service = Paf.alpn_service ~tls (alpn_handler ~ctx ~authenticator) in
+  let run_with_tls ~ctx ~authenticator ~tls tcpv4v6 http_server =
+    let alpn_service = HTTP_Server.alpn_service ~tls (alpn_handler ~ctx ~authenticator) in
     let http_1_1_service =
-      Paf.http_service ~error_handler:Server.http_1_1_error_handler
+      HTTP_Server.http_service ~error_handler:Server.http_1_1_error_handler
         (http_1_1_request_handler ~ctx ~authenticator) in
-    Paf.init ~port:https_port tcpv4v6 >|= Paf.serve alpn_service >>= fun (`Initialized th0) ->
-    Paf.init ~port:http_port tcpv4v6 >|= Paf.serve http_1_1_service >>= fun (`Initialized th1) ->
+    HTTP_Server.init ~port:(Key_gen.tls_port ()) tcpv4v6 >>= fun tls_server ->
+    let `Initialized th0 = HTTP_Server.serve alpn_service tls_server in
+    let `Initialized th1 = HTTP_Server.serve http_1_1_service http_server in
     Lwt.both th0 th1 >>= fun ((), ()) -> Lwt.return_unit
 
-  let run ~ctx ~authenticator port tcpv4v6 =
+  let run ~ctx ~authenticator http_server =
     let http_1_1_service =
-      Paf.http_service ~error_handler:Server.http_1_1_error_handler
+      HTTP_Server.http_service ~error_handler:Server.http_1_1_error_handler
         (http_1_1_request_handler ~ctx ~authenticator) in
-    Paf.init ~port tcpv4v6 >|= Paf.serve http_1_1_service >>= fun (`Initialized th) -> th
+    let `Initialized th = HTTP_Server.serve http_1_1_service http_server in th
 
-  let start _random certificate_ro key_ro tcpv4v6 ctx =
+  let start _random certificate_ro key_ro tcpv4v6 ctx http_server =
     let open Lwt.Infix in
     let authenticator = Connect.authenticator in
     tls key_ro certificate_ro >>= fun tls ->
     match Key_gen.tls (), tls, Key_gen.alpn () with
     | true, Ok certificates, None ->
       run_with_tls ~ctx ~authenticator ~tls:(Tls.Config.server ~certificates ~alpn_protocols:[ "h2"; "http/1.1" ] ())
-        (Key_gen.ports ()) tcpv4v6
+        tcpv4v6 http_server
     | true, Ok certificates, Some (("http/1.1" | "h2") as alpn_protocol) ->
       run_with_tls ~ctx ~authenticator ~tls:(Tls.Config.server ~certificates ~alpn_protocols:[ alpn_protocol ] ())
-        (Key_gen.ports ()) tcpv4v6
-    | false, _, _ -> run ~ctx ~authenticator (fst (Key_gen.ports ())) tcpv4v6
+        tcpv4v6 http_server
+    | false, _, _ -> run ~ctx ~authenticator http_server
     | _, _, Some protocol -> Fmt.failwith "Invalid protocol %S" protocol
     | true, Error _, _ -> Fmt.failwith "A TLS server requires, at least, one certificate and one private key."
 end
