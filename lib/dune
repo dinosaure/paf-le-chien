@@ -26,6 +26,6 @@
  (name le)
  (wrapped false)
  (public_name paf-le)
- (modules lE)
+ (modules paf_le lE)
  (libraries httpaf tcpip paf mirage-time duration tls-mirage emile
    letsencrypt))
