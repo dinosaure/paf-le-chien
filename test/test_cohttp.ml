@@ -60,7 +60,7 @@ let run_http_and_https_server ~request_handler stop =
   P.init ~port:3434 stack >>= fun socket1 ->
   let http = P.http_service ~error_handler (fun _flow -> request_handler) in
   let https =
-    P.https_service ~tls ~error_handler (fun _flow -> request_handler) in
+    P.https_service ~tls:(ref tls) ~error_handler (fun _flow -> request_handler) in
   let (`Initialized fiber0) = P.serve ~stop http socket0 in
   let (`Initialized fiber1) = P.serve ~stop https socket1 in
   Logs.debug (fun m -> m "Server initialised.") ;

@@ -124,7 +124,7 @@ module type S = sig
       service is not yet launched (see {!serve}). *)
 
   val https_service :
-    tls:Tls.Config.server ->
+    tls:Tls.Config.server ref ->
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
     (TLS.flow -> dst -> Httpaf.Server_connection.request_handler) ->

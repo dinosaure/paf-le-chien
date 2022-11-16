@@ -70,7 +70,7 @@ module type S = sig
     t Paf.service
 
   val https_service :
-    tls:Tls.Config.server ->
+    tls:Tls.Config.server ref ->
     ?config:Httpaf.Config.t ->
     error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
     (TLS.flow -> dst -> Httpaf.Server_connection.request_handler) ->
@@ -265,7 +265,7 @@ module Make (Stack : Tcpip.Tcp.S) :
     let module R = (val Mimic.repr tls_protocol) in
     let handshake tcp_flow =
       let dst = TCP.dst tcp_flow in
-      TLS.server_of_flow tls tcp_flow >>= function
+      TLS.server_of_flow !tls tcp_flow >>= function
       | Ok flow -> Lwt.return_ok (dst, flow)
       | Error `Closed ->
           (* XXX(dinosaure): be care! [`Closed] at this stage does not mean

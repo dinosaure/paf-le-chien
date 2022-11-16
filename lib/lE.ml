@@ -244,11 +244,16 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     Hashtbl.replace tokens token content ;
     Lwt.return (Ok ())
 
-  let request_handler (ipaddr, port) reqd =
+  let request_handler ~fallback (ipaddr, port) reqd =
     let req = Httpaf.Reqd.request reqd in
     Log.debug (fun m ->
         m "Let's encrypt request handler for %a:%d (%s)" Ipaddr.pp ipaddr port
           req.Httpaf.Request.target) ;
+    let not_found () =
+      let headers = Httpaf.Headers.of_list [ ("connection", "close") ] in
+      let resp = Httpaf.Response.create ~headers `Not_found in
+      Httpaf.Reqd.respond_with_string reqd resp ""
+    in
     match String.split_on_char '/' req.Httpaf.Request.target with
     | [ ""; p1; p2; token ]
       when String.equal p1 (fst prefix) && String.equal p2 (snd prefix) -> (
@@ -265,13 +270,11 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
             Httpaf.Reqd.respond_with_string reqd resp data
         | None ->
             Log.warn (fun m -> m "Token %S not found!" token) ;
-            let headers = Httpaf.Headers.of_list [ ("connection", "close") ] in
-            let resp = Httpaf.Response.create ~headers `Not_found in
-            Httpaf.Reqd.respond_with_string reqd resp "")
+            not_found ())
     | _ ->
-        let headers = Httpaf.Headers.of_list [ ("connection", "close") ] in
-        let resp = Httpaf.Response.create ~headers `Not_found in
-        Httpaf.Reqd.respond_with_string reqd resp ""
+        match fallback with
+        | Some fallback -> fallback (ipaddr, port) reqd
+        | None -> not_found ()
 
   let provision_certificate ?(tries = 10) ?(production = false) cfg ctx =
     let ( >>? ) = Lwt_result.bind in
