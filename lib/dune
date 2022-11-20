@@ -35,5 +35,5 @@
  (wrapped false)
  (public_name paf-le.mirage)
  (modules lE_mirage)
- (libraries paf.mirage paf-le dns-client.mirage mirage-time tcpip
+ (libraries rresult paf.mirage paf-le dns-client.mirage mirage-time tcpip
    mirage-random mirage-clock))

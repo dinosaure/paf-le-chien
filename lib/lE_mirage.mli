@@ -18,4 +18,22 @@ module Make
       This resolution requires that your domain name (requested in the given
       [cfg.hostname]) redirects Let's encrypt to this HTTP server. You probably
       need to check your DNS configuration. *)
+
+  module Paf : module type of Paf_mirage.Make (Stack.TCP)
+
+  val with_lets_encrypt_certificates :
+    ?port:int ->
+    Stack.t ->
+    production:bool ->
+    LE.configuration ->
+    (Paf.TLS.flow, Ipaddr.t * int) Alpn.server_handler ->
+    (unit, [> `Msg of string ]) result Lwt.t
+  (** [with_lets_encrypt_certificates ?port stackv4v6 ~production cfg handler]
+      launches 2 servers: 1) An HTTP server which handles let's encrypt
+      challenges and redirections 2) An ALPN server (HTTP/1.1 and H2) servers to
+      the user's request handler
+
+      Every 80 days, the fiber re-askes a new certificate from let's encrypt and
+      re-update the ALPN server with this new certificate. The HTTP server does
+      the redirection to the hostname defined into the given [cfg]. *)
 end
