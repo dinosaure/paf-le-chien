@@ -116,7 +116,7 @@ struct
       | None -> Lwt.return_error `No_certificates
       | Some certificates -> (
           let cfg =
-            Tls.Config.server ~alpn_protocols:[ "http/1.1"; "h2" ] ~certificates
+            Tls.Config.server ~alpn_protocols:[ "h2"; "http/1.1" ] ~certificates
               () in
           Paf.TLS.server_of_flow cfg tcp >>= function
           | Ok flow -> Lwt.return_ok (Paf.TCP.dst tcp, flow)
