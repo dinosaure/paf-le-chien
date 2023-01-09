@@ -83,4 +83,26 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) : sig
     Mimic.ctx
 
   val with_uri : Uri.t -> Mimic.ctx -> Mimic.ctx
+
+  val initialise :
+    ?ctx:Mimic.ctx ->
+    endpoint:Uri.t ->
+    ?email:string ->
+    X509.Private_key.t ->
+    (Letsencrypt.Client.t, [> `Msg of string ]) result Lwt.t
+  (** [initialise ~ctx ~endpoint ~email priv] constructs a
+      {!type:Letsencrypt.Client.t} by looking up the directory and account of
+      [priv] at [endpoint]. If no account is registered yet, a new account is
+      created with contact information of [email]. The terms of service are
+      agreed on. *)
+
+  val sign_certificate :
+    ?ctx:Mimic.ctx ->
+    Letsencrypt.Client.solver ->
+    Letsencrypt.Client.t ->
+    (int -> unit Lwt.t) ->
+    X509.Signing_request.t ->
+    (X509.Certificate.t list, [> `Msg of string ]) result Lwt.t
+  (** [sign_certificate ~ctx solver t sleep csr] orders a certificate for the
+      names in the signing request [csr], and solves the requested challenges. *)
 end
