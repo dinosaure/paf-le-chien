@@ -1,3 +1,9 @@
+### 0.4.0 (2023-01-10) Paris - France
+
+- Fix memory leak about functor application (@dinosaure, #78)
+- Add a new sub-package `le.mirage` to facilite obtaining a let's encrypt certificate
+  and expose few functions to handle Let's encrypt certificates (@kit-ty-kate, @dinosaure, @hannesm, #75)
+
 ### 0.3.0 (2022-10-19) Paris - France
 
 - Fix a file-descriptor leak when we fail on the TLS handshake (#72, @TheLortex, @dinosaure, @hannesm)
