@@ -1,6 +1,7 @@
 open Lwt.Infix
 
 let ( >>? ) = Lwt_result.bind
+let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
 
 let pp_error ppf = function
   | #Httpaf.Status.t as code -> Httpaf.Status.pp_hum ppf code
@@ -122,7 +123,7 @@ struct
           | Ok flow -> Lwt.return_ok (Paf.TCP.dst tcp, flow)
           | Error `Closed -> Lwt.return_error (`Write `Closed)
           | Error err ->
-              let err = Rresult.R.msgf "%a" Paf.TLS.pp_write_error err in
+              let err = msgf "%a" Paf.TLS.pp_write_error err in
               Paf.TCP.close tcp >>= fun () -> Lwt.return_error err) in
     let module R = (val Mimic.repr Paf.tls_protocol) in
     let request flow edn reqd protocol =
