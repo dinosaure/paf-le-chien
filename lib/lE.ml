@@ -396,4 +396,6 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     |> Mimic.fold ipaddr Fun.[ req domain_name ] ~k:k2
 
   let with_uri = with_uri
+  let initialise = Acme.initialise
+  let sign_certificate = Acme.sign_certificate
 end
