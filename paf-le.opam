@@ -16,13 +16,13 @@ depends: [
   "emile" {>= "1.1"}
   "httpaf"
   "letsencrypt" {>= "0.4.0"}
-  "mirage-time"
+  "mirage-time" {>= "3.0.0"}
   "mirage-random"
   "mirage-clock"
   "tls-mirage"
   "tcpip" {>= "7.0.0"}
   "x509" {>= "0.13.0"}
-  "dns-client"
+  "dns-client" {>= "6.4.0"}
 ]
 build: ["dune" "build" "-p" name "-j" jobs]
 run-test: ["dune" "runtest" "-p" name "-j" jobs]
