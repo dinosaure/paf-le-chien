@@ -226,7 +226,7 @@ let run ?alpn handler edn request flow =
         handler.response flow edn response body (H2 h2) in
       let conn =
         H2.Client_connection.create ?config:None ?push_handler:None
-          ~error_handler in
+          ~error_handler () in
       let body =
         H2.Client_connection.request conn request ~error_handler
           ~response_handler in
