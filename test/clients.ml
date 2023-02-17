@@ -28,7 +28,9 @@ let run uri =
 
 let run_client uri =
   run_process (fun () ->
-      let () = Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna) in
+      let () =
+        Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna)
+      in
       Lwt_main.run (run uri))
 
 let const x _ = x
