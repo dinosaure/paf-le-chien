@@ -14,7 +14,7 @@ let reporter ppf =
 
 let apply v f = f v
 let sigpipe = 13
-let () = Mirage_crypto_rng_unix.initialize ()
+let () = Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna)
 let () = Printexc.record_backtrace true
 
 (*
