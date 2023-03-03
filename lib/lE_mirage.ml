@@ -84,7 +84,7 @@ struct
     }
 
   let with_lets_encrypt_certificates ?(port = 443)
-      ?(alpn_protocols = [ "h2"; "http/1.1" ]) stackv4v6 ~production config
+      ?(alpn_protocols = [ "http/1.1"; "h2" ]) stackv4v6 ~production config
       handler =
     let certificates = ref None in
     let stop_http_server = Lwt_switch.create () in
