@@ -128,7 +128,7 @@ module Make (Flow : Mirage_flow.S) = struct
     let iovecs =
       List.map
         (fun { Faraday.buffer; off; len } ->
-          Cstruct.copy (Cstruct.of_bigarray buffer ~off ~len) 0 len)
+          Cstruct.to_string (Cstruct.of_bigarray buffer ~off ~len) ~off:0 ~len)
         iovecs in
     let iovecs = List.map Cstruct.of_string iovecs in
     (* XXX(dinosaure): the copy is needed:
