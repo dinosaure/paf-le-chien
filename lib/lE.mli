@@ -18,7 +18,7 @@
         Paf.init ~port:80 (Stack.tcp stackv4v6) >>= fun t ->
         let service = Paf.http_service
           ~error_handler:ignore_error
-          (fun _ -> LE.request_handler) in
+          (fun _ -> LE.request_handler ~fallback:None) in
         let stop = Lwt_switch.create () in
         let `Initialized th0 = Paf.serve ~stop service in
         let th1 =
@@ -63,6 +63,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) : sig
   }
 
   val request_handler :
+    fallback:(Ipaddr.t * int -> Httpaf.Server_connection.request_handler) option ->
     Ipaddr.t * int -> Httpaf.Server_connection.request_handler
 
   val provision_certificate :

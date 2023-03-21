@@ -164,7 +164,7 @@ let server_https cert key large stack =
   | Ok certs, Ok (`RSA key) ->
       let tls = Tls.Config.server ~certificates:(`Single (certs, `RSA key)) () in
       P.init ~port:4343 stack >>= fun service ->
-      let https = P.https_service ~tls ~error_handler (request_handler large) in
+      let https = P.https_service ~tls:(ref tls) ~error_handler (request_handler large) in
       let (`Initialized th) = P.serve https service in
       unlock fd_4343 ;
       th
