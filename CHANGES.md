@@ -1,3 +1,15 @@
+### 0.5.0 (2023-21-03) Paris - France
+
+- Upgrade to `mirage-crypto-rng.0.11.0` (@hannesm, @dinosaure, #85)
+- Be able to specify ALPN protocols (@kit-ty-kate, @dinosaure, #86)
+  Also merged into `ocaml-letsencrypt` (see mmaker/ocaml-letsencrypt#33)
+- Set the default protocol used for the ALPN negotiation to "http/1.1" (@dinosaure, #87)
+  Also merged into `ocaml-letsencrypt` (see mmaker/ocaml-letsencrypt#33)
+- Upgrade `paf` to `h2.0.10.0` (@kit-ty-kate, @dinosaure, #83)
+- Replace `Cstruct.copy` (deprecated) by `Cstruct.to_string` (@dinosaure, #83)
+- Delete `paf-le` package (@dinosaure, @hannesm, #88)
+  Implementations are available via the new package `letsencrypt-mirage`
+
 ### 0.4.0 (2023-01-10) Paris - France
 
 - Fix memory leak about functor application (@dinosaure, #78)
