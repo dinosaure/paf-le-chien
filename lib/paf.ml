@@ -147,7 +147,7 @@ module Make (Flow : Mirage_flow.S) = struct
             (List.fold_left (fun acc cs -> acc + Cstruct.length cs) 0 iovecs))
     | Error err ->
         Log_flow.err (fun m ->
-            m "Got an errror when we wrote something: %a." Flow.pp_write_error
+            m "Got an error when we wrote something: %a." Flow.pp_write_error
               err) ;
         report_error err ;
         flow.wr_closed <- true ;
