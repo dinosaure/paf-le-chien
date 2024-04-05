@@ -32,7 +32,10 @@ module type S = sig
       ?cert:Tls.Config.own_cert ->
       ?drop:bool ->
       flow ->
-      (unit, write_error) result Lwt.t
+      (unit, [ write_error | `Msg of string ]) result Lwt.t
+
+    val key_update : ?request:bool -> flow ->
+      (unit, [ write_error | `Msg of string ]) result Lwt.t
 
     val server_of_flow :
       Tls.Config.server -> TCP.flow -> (flow, write_error) result Lwt.t
@@ -138,6 +141,8 @@ module Make (Stack : Tcpip.Tcp.S) :
       | false ->
           Log.debug (fun m -> m "Really close the connection.") ;
           close flow.flow
+
+    let shutdown flow = shutdown flow.flow
   end
 
   module TLS = struct
@@ -169,10 +174,14 @@ module Make (Stack : Tcpip.Tcp.S) :
     let read (_, tls_flow) = read tls_flow
     let write (_, tls_flow) = write tls_flow
     let writev (_, tls_flow) = writev tls_flow
+    let shutdown (_, tls_flow) = shutdown tls_flow
     let epoch (_, tls_flow) = epoch tls_flow
 
     let reneg ?authenticator ?acceptable_cas ?cert ?drop (_, tls_flow) =
       reneg ?authenticator ?acceptable_cas ?cert ?drop tls_flow
+
+    let key_update ?request (_, tls_flow) =
+      key_update ?request tls_flow
 
     let server_of_flow config tcp_flow =
       Lwt_result.Infix.(

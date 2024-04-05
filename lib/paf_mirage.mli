@@ -58,7 +58,10 @@ module type S = sig
       ?cert:Tls.Config.own_cert ->
       ?drop:bool ->
       flow ->
-      (unit, write_error) result Lwt.t
+      (unit, [ write_error | `Msg of string ]) result Lwt.t
+
+    val key_update : ?request:bool -> flow ->
+      (unit, [ write_error | `Msg of string ]) result Lwt.t
 
     val server_of_flow :
       Tls.Config.server -> TCP.flow -> (flow, write_error) result Lwt.t
