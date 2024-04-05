@@ -88,15 +88,15 @@ let show_bar width ppf proportion =
     Format.pp_print_string ppf utf8_chars.(utf_num)
   done ;
   (if filled <> bar_width
-  then
-    let () =
-      let chunks = Float.to_int (squaresf *. Float.of_int utf_num) in
-      let index = chunks - (filled * utf_num) in
-      if index < utf_num then Format.pp_print_string ppf utf8_chars.(index)
-    in
-    for _ = 1 to not_filled do
-      Format.pp_print_string ppf utf8_chars.(0)
-    done) ;
+   then
+     let () =
+       let chunks = Float.to_int (squaresf *. Float.of_int utf_num) in
+       let index = chunks - (filled * utf_num) in
+       if index < utf_num then Format.pp_print_string ppf utf8_chars.(index)
+     in
+     for _ = 1 to not_filled do
+       Format.pp_print_string ppf utf8_chars.(0)
+     done) ;
   Format.pp_print_string ppf "│"
 
 let exit_failure = 1
