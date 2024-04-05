@@ -34,7 +34,9 @@ module type S = sig
       flow ->
       (unit, [ write_error | `Msg of string ]) result Lwt.t
 
-    val key_update : ?request:bool -> flow ->
+    val key_update :
+      ?request:bool ->
+      flow ->
       (unit, [ write_error | `Msg of string ]) result Lwt.t
 
     val server_of_flow :
@@ -180,8 +182,7 @@ module Make (Stack : Tcpip.Tcp.S) :
     let reneg ?authenticator ?acceptable_cas ?cert ?drop (_, tls_flow) =
       reneg ?authenticator ?acceptable_cas ?cert ?drop tls_flow
 
-    let key_update ?request (_, tls_flow) =
-      key_update ?request tls_flow
+    let key_update ?request (_, tls_flow) = key_update ?request tls_flow
 
     let server_of_flow config tcp_flow =
       Lwt_result.Infix.(
