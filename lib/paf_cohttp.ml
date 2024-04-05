@@ -221,5 +221,6 @@ let callv ?ctx:_ _uri _stream = assert false (* TODO *)
 [@@@warning "-32"]
 
 let sexp_of_ctx _ctx = assert false
+let set_cache _call = assert false
 
 [@@@warning "+32"]
