@@ -206,8 +206,7 @@ end = struct
         | `Close ->
             Log_server.debug (fun m -> m "next read operation: `close") ;
             Lwt.wakeup_later notify_rd_exit () ;
-            flow.Easy_flow.rd_closed <- true ;
-            Easy_flow.safely_close flow in
+            Flow.shutdown flow.flow `read in
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
           Runtime.report_exn connection exn ;
@@ -230,8 +229,7 @@ end = struct
         | `Close _ ->
             Log_server.debug (fun m -> m "next write operation: `close") ;
             Lwt.wakeup_later notify_wr_exit () ;
-            flow.Easy_flow.wr_closed <- true ;
-            Easy_flow.safely_close flow in
+            Flow.shutdown flow.flow `write in
       Lwt.async @@ fun () ->
       Lwt.catch go (fun exn ->
           (* Runtime.report_write_result connection `Closed ; *)
