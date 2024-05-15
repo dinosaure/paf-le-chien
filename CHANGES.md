@@ -1,3 +1,9 @@
+### 0.6.0 (2024-05-07) Paris - France
+
+- Fix typographie on errors (@hannesm, #91)
+- Introduce and use the new `shutdown` function (@hannesm, @dinosaure, #92)
+- Update to ocamlformat.0.26.1 (@dinosaure, #94)
+
 ### 0.5.0 (2023-21-03) Paris - France
 
 - Upgrade to `mirage-crypto-rng.0.11.0` (@hannesm, @dinosaure, #85)
