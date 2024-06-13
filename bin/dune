@@ -1,0 +1,4 @@
+(executable
+ (name hurle)
+ (libraries hxd.core hxd.string fmt.tty logs.fmt logs.threaded miou.unix mimic.e paf.e
+   ipaddr ipaddr.unix ca-certs mtime.clock.os mirage-crypto-rng.unix duration tls domain-name httpaf h2))
