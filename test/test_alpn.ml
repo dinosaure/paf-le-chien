@@ -47,9 +47,10 @@ let tls =
     (X509.Certificate.decode_pem_multiple cert, X509.Private_key.decode_pem key)
   with
   | Ok certs, Ok (`RSA key) ->
-      Result.get_ok (Tls.Config.server ~alpn_protocols:[ "http/1.1"; "h2" ]
-                       ~certificates:(`Single (certs, `RSA key))
-                       ())
+      Result.get_ok
+        (Tls.Config.server ~alpn_protocols:[ "http/1.1"; "h2" ]
+           ~certificates:(`Single (certs, `RSA key))
+           ())
   | _ -> invalid_arg "Invalid certificate or key"
 
 let alpn_of_tls_connection (_, flow) =
@@ -157,7 +158,9 @@ let test01 =
   let th, wk = Lwt.wait () in
   let request, wk_request = Lwt.wait () in
   let service = service (server_handler wk_request wk) () in
-  let tls = Result.get_ok (Tls.Config.client ~authenticator ~alpn_protocols:[ "http/1.1" ] ()) in
+  let tls =
+    Result.get_ok
+      (Tls.Config.client ~authenticator ~alpn_protocols:[ "http/1.1" ] ()) in
   let req = `V1 (Httpaf.Request.create `GET "/") in
   Lwt.both
     ( unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun stack ->
@@ -187,7 +190,9 @@ let test02 =
   let th, wk = Lwt.wait () in
   let request, wk_request = Lwt.wait () in
   let service = service (server_handler wk_request wk) () in
-  let tls = Result.get_ok (Tls.Config.client ~authenticator ~alpn_protocols:[ "h2" ] ()) in
+  let tls =
+    Result.get_ok (Tls.Config.client ~authenticator ~alpn_protocols:[ "h2" ] ())
+  in
   let req = `V2 (H2.Request.create ~scheme:"https" `GET "/") in
   Lwt.both
     ( unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun stack ->

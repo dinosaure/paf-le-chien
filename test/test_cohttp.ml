@@ -49,7 +49,8 @@ let tls =
     (X509.Certificate.decode_pem_multiple cert, X509.Private_key.decode_pem key)
   with
   | Ok certs, Ok (`RSA key) ->
-     Result.get_ok (Tls.Config.server ~certificates:(`Single (certs, `RSA key)) ())
+      Result.get_ok
+        (Tls.Config.server ~certificates:(`Single (certs, `RSA key)) ())
   | _ -> invalid_arg "Invalid certificate or key"
 
 let sleep = Lwt_unix.sleep <.> Int64.to_float
