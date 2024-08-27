@@ -40,7 +40,7 @@ let load_file filename =
   let rs = Bytes.create ln in
   really_input ic rs 0 ln ;
   close_in ic ;
-  Cstruct.of_bytes rs
+  Bytes.unsafe_to_string rs
 
 let tls =
   let cert = load_file "server.pem" in
@@ -49,7 +49,7 @@ let tls =
     (X509.Certificate.decode_pem_multiple cert, X509.Private_key.decode_pem key)
   with
   | Ok certs, Ok (`RSA key) ->
-      Tls.Config.server ~certificates:(`Single (certs, `RSA key)) ()
+     Result.get_ok (Tls.Config.server ~certificates:(`Single (certs, `RSA key)) ())
   | _ -> invalid_arg "Invalid certificate or key"
 
 let sleep = Lwt_unix.sleep <.> Int64.to_float
@@ -87,7 +87,7 @@ let tls_connect scheme domain_name cfg stack ipaddr port =
 
 let null =
   let authenticator ?ip:_ ~host:_ _ = Ok None in
-  Tls.Config.client ~authenticator ()
+  Result.get_ok (Tls.Config.client ~authenticator ())
 
 module Client = Paf_cohttp
 
