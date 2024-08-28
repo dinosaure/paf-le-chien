@@ -153,7 +153,7 @@ let load_file filename =
   let rs = Bytes.create ln in
   really_input ic rs 0 ln ;
   close_in ic ;
-  Cstruct.of_bytes rs
+  Bytes.unsafe_to_string rs
 
 let server_https cert key large stack =
   let cert = load_file cert in
@@ -162,7 +162,9 @@ let server_https cert key large stack =
     (X509.Certificate.decode_pem_multiple cert, X509.Private_key.decode_pem key)
   with
   | Ok certs, Ok (`RSA key) ->
-      let tls = Tls.Config.server ~certificates:(`Single (certs, `RSA key)) () in
+      let tls =
+        Result.get_ok
+          (Tls.Config.server ~certificates:(`Single (certs, `RSA key)) ()) in
       P.init ~port:4343 stack >>= fun service ->
       let https = P.https_service ~tls ~error_handler (request_handler large) in
       let (`Initialized th) = P.serve https service in

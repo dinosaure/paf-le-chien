@@ -85,7 +85,7 @@ let anchors = []
 
 let null =
   let authenticator ?ip:_ ~host:_ _ = Ok None in
-  Tls.Config.client ~authenticator ()
+  Result.get_ok (Tls.Config.client ~authenticator ())
 
 let v =
   Tcpip_stack_socket.V4V6.UDP.connect ~ipv4_only:false ~ipv6_only:false
