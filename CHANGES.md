@@ -1,3 +1,7 @@
+### 0.7.0 (2024-08-28) Paris - France
+
+- Upgrade to tls.1.0.0 and x509.1.0.0 (@hannesm, #96)
+
 ### 0.6.0 (2024-05-07) Paris - France
 
 - Fix typographie on errors (@hannesm, #91)
