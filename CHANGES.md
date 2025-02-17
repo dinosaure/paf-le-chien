@@ -1,3 +1,8 @@
+### 0.8.0 (2025-02-17) Paris - France
+
+- Add `x-maintenance-intent` (@hannesm, #100)
+- Remove `mirage-time` dependency and upgrade to mirage-crypto.1.2.0 (@hannesm, #101)
+
 ### 0.7.0 (2024-08-28) Paris - France
 
 - Upgrade to tls.1.0.0 and x509.1.0.0 (@hannesm, #96)
