@@ -97,8 +97,7 @@ type version = HTTP_1_1 | HTTP_2_0
 
 let error_handler _ _protocol ?request:_ _error _response = ()
 
-let request_handler :
-    type reqd headers request response ro wo.
+let request_handler : type reqd headers request response ro wo.
     _ ->
     _ ->
     _ ->

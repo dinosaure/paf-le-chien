@@ -33,8 +33,7 @@ let ( >>? ) x f =
 let ( <.> ) f g x = f (g x)
 let apply v f = f v
 
-let response_handler :
-    type reqd headers request response ro wo.
+let response_handler : type reqd headers request response ro wo.
     _ ->
     f:(H1.Response.t -> string -> unit Lwt.t) ->
     Mimic.flow ->

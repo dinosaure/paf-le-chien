@@ -25,7 +25,11 @@ module type RUNTIME = sig
       {!next_read_operation} returns a [`Yield] value. *)
 
   val next_write_operation :
-    t -> [ `Write of Bigstringaf.t Faraday.iovec list | `Yield | `Close of int | `Upgrade ]
+    t ->
+    [ `Write of Bigstringaf.t Faraday.iovec list
+    | `Yield
+    | `Close of int
+    | `Upgrade ]
   (** [next_write_operation t] returns a value describing the next operation
       that the caller should conduct on behalf the connection. *)
 
@@ -55,7 +59,8 @@ module type RUNTIME = sig
   (** [is_closed t] is [true] if both the read and write processors have been
       shutdown. When this is the case {!next_read_operation} will return
       [`Close _] and {!next_write_operation} will return a [`Write _] until all
-      buffered output has been flushed, at which point it will return [`Close]. *)
+      buffered output has been flushed, at which point it will return [`Close].
+  *)
 
   val shutdown : t -> unit
   (** [shutdown t] asks to shutdown the connection. *)
@@ -143,8 +148,7 @@ module Make (Flow : Mirage_flow.S) = struct
     Flow.writev flow.flow iovecs >>= function
     | Ok () ->
         Lwt.return
-          (`Ok
-            (List.fold_left (fun acc cs -> acc + Cstruct.length cs) 0 iovecs))
+          (`Ok (List.fold_left (fun acc cs -> acc + Cstruct.length cs) 0 iovecs))
     | Error err ->
         Log_flow.err (fun m ->
             m "Got an error when we wrote something: %a." Flow.pp_write_error
@@ -343,8 +347,7 @@ let service connection handshake accept close =
 
 open Lwt.Infix
 
-let serve_when_ready :
-    type t socket flow.
+let serve_when_ready : type t socket flow.
     (t, socket, flow, _) posix ->
     ?stop:Lwt_switch.t ->
     handler:(flow -> unit Lwt.t) ->

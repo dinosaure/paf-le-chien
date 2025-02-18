@@ -267,8 +267,8 @@ module Make (Stack : Tcpip.Tcp.S) :
       let conn =
         H1.Server_connection.create ?config ~error_handler request_handler'
       in
-      Lwt.return_ok
-        (R.T flow, Paf.Runtime ((module H1.Server_connection), conn)) in
+      Lwt.return_ok (R.T flow, Paf.Runtime ((module H1.Server_connection), conn))
+    in
     Paf.service connection Lwt.return_ok accept close
 
   let https_service ~tls ?config ~error_handler request_handler =
@@ -292,8 +292,8 @@ module Make (Stack : Tcpip.Tcp.S) :
       let conn =
         H1.Server_connection.create ?config ~error_handler request_handler'
       in
-      Lwt.return_ok
-        (R.T flow, Paf.Runtime ((module H1.Server_connection), conn)) in
+      Lwt.return_ok (R.T flow, Paf.Runtime ((module H1.Server_connection), conn))
+    in
     Paf.service connection handshake accept close
 
   let alpn =
@@ -336,7 +336,8 @@ module Make (Stack : Tcpip.Tcp.S) :
       | _ -> assert false
       (* XXX(dinosaure): this case should never occur. Indeed, the [injection]
          given to [Alpn.service] only create a [tls_protocol] flow. We just
-         destruct it and give it to [request_handler]. *) in
+         destruct it and give it to [request_handler]. *)
+    in
     Alpn.service alpn { handler with request } handshake accept close
 
   let serve ?stop service t = Paf.serve ?stop service t

@@ -112,7 +112,11 @@ module H1_Client_connection = struct
     (next_read_operation t :> [ `Close | `Read | `Yield | `Upgrade ])
 
   let next_write_operation t =
-    (next_write_operation t :> [ `Close of int | `Write of Bigstringaf.t H2.IOVec.t list | `Yield | `Upgrade ])
+    (next_write_operation t
+      :> [ `Close of int
+         | `Write of Bigstringaf.t H2.IOVec.t list
+         | `Yield
+         | `Upgrade ])
 end
 
 type ('flow, 'edn) info = {
@@ -146,7 +150,11 @@ module H2_Server_connection = struct
   include H2.Server_connection
 
   let next_write_operation t =
-    (next_write_operation t :> [ `Close of int | `Write of Bigstringaf.t H2.IOVec.t list | `Yield | `Upgrade ])
+    (next_write_operation t
+      :> [ `Close of int
+         | `Write of Bigstringaf.t H2.IOVec.t list
+         | `Yield
+         | `Upgrade ])
 end
 
 let service :
@@ -168,10 +176,8 @@ let service :
             respond in
         let request_handler' reqd =
           handler.request flow edn reqd (HTTP_1_1 http_1_1) in
-        let conn =
-          H1.Server_connection.create ~error_handler request_handler' in
-        Lwt.return_ok
-          (flow, Paf.Runtime ((module H1.Server_connection), conn))
+        let conn = H1.Server_connection.create ~error_handler request_handler' in
+        Lwt.return_ok (flow, Paf.Runtime ((module H1.Server_connection), conn))
     | Some "h2" ->
         let edn = info.peer flow in
         let flow = info.injection flow in
@@ -225,7 +231,11 @@ module H2_Client_connection = struct
   include H2.Client_connection
 
   let next_write_operation t =
-    (next_write_operation t :> [ `Close of int | `Write of Bigstringaf.t H2.IOVec.t list | `Yield | `Upgrade ])
+    (next_write_operation t
+      :> [ `Close of int
+         | `Write of Bigstringaf.t H2.IOVec.t list
+         | `Yield
+         | `Upgrade ])
 end
 
 type alpn_response =
@@ -255,8 +265,8 @@ let run ?alpn handler edn request flow =
       let response_handler response body =
         handler.response flow edn response body (HTTP_1_1 http_1_1) in
       let body, conn =
-        H1.Client_connection.request request ~error_handler
-          ~response_handler in
+        H1.Client_connection.request request ~error_handler ~response_handler
+      in
       Lwt.async (fun () -> Paf.run (module H1_Client_connection) conn flow) ;
       Lwt.return_ok (Response_HTTP_1_1 (body, conn))
   | Some protocol, _ ->

@@ -106,8 +106,7 @@ let with_transfer_encoding ~chunked (meth : Cohttp.Code.meth) body headers =
         (string_of_int (String.length str))
   | _, (None | Some false), `Strings sstr, None ->
       let len = List.fold_right (( + ) <.> String.length) sstr 0 in
-      H1.Headers.add_unless_exists headers "content-length"
-        (string_of_int len)
+      H1.Headers.add_unless_exists headers "content-length" (string_of_int len)
   | _, Some false, `Stream _, None ->
       invalid_arg "Impossible to transfer a stream with a content-length value"
 
@@ -120,7 +119,11 @@ module H1_Client_connection = struct
     (next_read_operation t :> [ `Close | `Read | `Yield | `Upgrade ])
 
   let next_write_operation t =
-    (next_write_operation t :> [ `Close of int | `Write of Bigstringaf.t H1.IOVec.t list | `Yield | `Upgrade ])
+    (next_write_operation t
+      :> [ `Close of int
+         | `Write of Bigstringaf.t H1.IOVec.t list
+         | `Yield
+         | `Upgrade ])
 end
 
 let call ?(ctx = default_ctx) ?headers
@@ -154,8 +157,8 @@ let call ?(ctx = default_ctx) ?headers
       let error_handler = error_handler mvar_err in
       let response_handler = response_handler mvar_res pusher in
       let httpaf_body, conn =
-        H1.Client_connection.request ~config ~error_handler
-          ~response_handler req in
+        H1.Client_connection.request ~config ~error_handler ~response_handler
+          req in
       Lwt.async (fun () -> Paf.run (module H1_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
       Log.debug (fun m -> m "Body transmitted.") ;
@@ -180,12 +183,10 @@ let call ?(ctx = default_ctx) ?headers
             | { major; minor } -> `Other (Fmt.str "%d.%d" major minor) in
           let status =
             match
-              (resp.H1.Response.status
-                :> [ Cohttp.Code.status | H1.Status.t ])
+              (resp.H1.Response.status :> [ Cohttp.Code.status | H1.Status.t ])
             with
             | #Cohttp.Code.status as status -> status
-            | #H1.Status.t as status -> `Code (H1.Status.to_code status)
-          in
+            | #H1.Status.t as status -> `Code (H1.Status.to_code status) in
           let encoding =
             match meth with
             | #H1.Method.standard as meth -> (
@@ -195,8 +196,8 @@ let call ?(ctx = default_ctx) ?headers
                 | `Fixed length -> Cohttp.Transfer.Fixed length)
             | _ -> Cohttp.Transfer.Chunked in
           let headers =
-            Cohttp.Header.of_list
-              (H1.Headers.to_list resp.H1.Response.headers) in
+            Cohttp.Header.of_list (H1.Headers.to_list resp.H1.Response.headers)
+          in
           let resp =
             Cohttp.Response.make ~version ~status ~encoding ~headers () in
           Lwt.return (resp, `Stream stream))
