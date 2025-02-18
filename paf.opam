@@ -25,7 +25,7 @@ depends: [
   "alcotest-lwt" {with-test}
   "x509" {with-test & > "1.0.0"}
   "bigstringaf" {>= "0.7.0"}
-  "httpaf" {>= "0.7.1"}
+  "h1"
   "h2" {>= "0.10.0"}
   "faraday" {>= "0.7.2"}
   "tls" {>= "1.0.0"}

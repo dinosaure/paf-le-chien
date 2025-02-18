@@ -1,7 +1,7 @@
 module type RUNTIME = sig
   type t
 
-  val next_read_operation : t -> [ `Read | `Yield | `Close ]
+  val next_read_operation : t -> [ `Read | `Yield | `Close | `Upgrade ]
   (** [next_read_connection t] returns a value describing the next operation
       that the caller should conduit on behalf of the connection. *)
 
@@ -25,7 +25,7 @@ module type RUNTIME = sig
       {!next_read_operation} returns a [`Yield] value. *)
 
   val next_write_operation :
-    t -> [ `Write of Bigstringaf.t Faraday.iovec list | `Yield | `Close of int ]
+    t -> [ `Write of Bigstringaf.t Faraday.iovec list | `Yield | `Close of int | `Upgrade ]
   (** [next_write_operation t] returns a value describing the next operation
       that the caller should conduct on behalf the connection. *)
 

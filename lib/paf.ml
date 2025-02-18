@@ -1,7 +1,7 @@
 module type RUNTIME = sig
   type t
 
-  val next_read_operation : t -> [ `Read | `Yield | `Close ]
+  val next_read_operation : t -> [ `Read | `Yield | `Close | `Upgrade ]
   (** [next_read_connection t] returns a value describing the next operation
       that the caller should conduit on behalf of the connection. *)
 
@@ -25,7 +25,7 @@ module type RUNTIME = sig
       {!next_read_operation} returns a [`Yield] value. *)
 
   val next_write_operation :
-    t -> [ `Write of Bigstringaf.t Faraday.iovec list | `Yield | `Close of int ]
+    t -> [ `Write of Bigstringaf.t Faraday.iovec list | `Yield | `Close of int | `Upgrade ]
   (** [next_write_operation t] returns a value describing the next operation
       that the caller should conduct on behalf the connection. *)
 
@@ -193,6 +193,7 @@ end = struct
       let rec go () =
         Log_server.debug (fun m -> m "Compute next read operation.") ;
         match Runtime.next_read_operation connection with
+        | `Upgrade -> failwith "Unimplemented"
         | `Read ->
             Log_server.debug (fun m -> m "next read operation: `read") ;
             Easy_flow.recv flow ~report_error ~report_closed:ignore
@@ -217,6 +218,7 @@ end = struct
       let rec go () =
         Log_server.debug (fun m -> m "Compute next write operation.") ;
         match Runtime.next_write_operation connection with
+        | `Upgrade -> failwith "Unimplemented"
         | `Write iovecs ->
             Log_server.debug (fun m -> m "next write operation: `write") ;
             Easy_flow.send ~report_error flow iovecs >>= fun res ->
@@ -267,6 +269,7 @@ end = struct
         Runtime.report_exn connection (to_flow_exception err) in
       let rec go () =
         match Runtime.next_read_operation connection with
+        | `Upgrade -> failwith "Unimplemented"
         | `Read ->
             Log_client.debug (fun m -> m "next read operation: `read") ;
             Easy_flow.recv flow ~report_error ~report_closed:ignore
@@ -291,6 +294,7 @@ end = struct
         Runtime.report_exn connection (to_flow_write_exception err) in
       let rec go () =
         match Runtime.next_write_operation connection with
+        | `Upgrade -> failwith "Unimplemented"
         | `Write iovecs ->
             Log_client.debug (fun m -> m "next write operation: `write.") ;
             Easy_flow.send ~report_error flow iovecs >>= fun res ->

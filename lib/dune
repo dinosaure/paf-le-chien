@@ -8,7 +8,7 @@
  (name alpn)
  (public_name paf.alpn)
  (modules alpn)
- (libraries paf httpaf h2))
+ (libraries paf h1 h2))
 
 (library
  (name paf_mirage)
@@ -20,4 +20,4 @@
  (name paf_cohttp)
  (public_name paf-cohttp)
  (modules paf_cohttp)
- (libraries ipaddr domain-name paf httpaf cohttp-lwt))
+ (libraries ipaddr domain-name paf h1 cohttp-lwt))

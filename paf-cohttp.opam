@@ -14,7 +14,7 @@ depends: [
   "paf" {= version}
   "cohttp-lwt" {< "6.0.0~"}
   "domain-name"
-  "httpaf"
+  "h1"
   "ipaddr"
   "alcotest-lwt"      {with-test & >= "1.1.0"}
   "fmt"               {with-test}

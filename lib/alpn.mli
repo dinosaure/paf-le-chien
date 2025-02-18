@@ -37,11 +37,11 @@ end
 
 type http_1_1_protocol =
   (module REQD
-     with type t = Httpaf.Reqd.t
-      and type request = Httpaf.Request.t
-      and type response = Httpaf.Response.t
-      and type Body.ro = [ `read ] Httpaf.Body.t
-      and type Body.wo = [ `write ] Httpaf.Body.t)
+     with type t = H1.Reqd.t
+      and type request = H1.Request.t
+      and type response = H1.Response.t
+      and type Body.ro = H1.Body.Reader.t
+      and type Body.wo = H1.Body.Writer.t)
 
 type h2_protocol =
   (module REQD
@@ -54,12 +54,12 @@ type h2_protocol =
 type ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol =
   | HTTP_1_1 :
       http_1_1_protocol
-      -> ( Httpaf.Reqd.t,
-           Httpaf.Headers.t,
-           Httpaf.Request.t,
-           Httpaf.Response.t,
-           [ `read ] Httpaf.Body.t,
-           [ `write ] Httpaf.Body.t )
+      -> ( H1.Reqd.t,
+           H1.Headers.t,
+           H1.Request.t,
+           H1.Response.t,
+           H1.Body.Reader.t,
+           H1.Body.Writer.t )
          protocol
   | H2 :
       h2_protocol
@@ -72,12 +72,12 @@ type ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol =
          protocol
 
 val http_1_1 :
-  ( Httpaf.Reqd.t,
-    Httpaf.Headers.t,
-    Httpaf.Request.t,
-    Httpaf.Response.t,
-    [ `read ] Httpaf.Body.t,
-    [ `write ] Httpaf.Body.t )
+  ( H1.Reqd.t,
+    H1.Headers.t,
+    H1.Request.t,
+    H1.Response.t,
+    H1.Body.Reader.t,
+    H1.Body.Writer.t )
   protocol
 
 val h2 :
@@ -156,8 +156,8 @@ type ('flow, 'edn) server_handler = {
         = fun edn protocol ?request error respond ->
           match protocol with
           | Alpn.HTTP_1_1 _ ->
-            (* everything is specialized to the [Httpaf] module. You can use
-               [?request] as an [Httpaf.Request.t option] without type error. *)
+            (* everything is specialized to the [H1] module. You can use
+               [?request] as an [H1.Request.t option] without type error. *)
           | Alpn.H2 _ ->
             (* everything is specialized to the [H2] module. *)
 
@@ -236,7 +236,7 @@ val service :
 type client_error =
   [ `Exn of exn
   | `Malformed_response of string
-  | `Invalid_response_body_length_v1 of Httpaf.Response.t
+  | `Invalid_response_body_length_v1 of H1.Response.t
   | `Invalid_response_body_length_v2 of H2.Response.t
   | `Protocol_error of H2.Error_code.t * string ]
 (** Type of client errors. *)
@@ -263,7 +263,7 @@ type 'edn client_handler = {
 
 type alpn_response =
   | Response_HTTP_1_1 :
-      ([ `write ] Httpaf.Body.t * Httpaf.Client_connection.t)
+      (H1.Body.Writer.t * H1.Client_connection.t)
       -> alpn_response
   | Response_H2 : H2.Body.Writer.t * H2.Client_connection.t -> alpn_response
 
@@ -271,7 +271,7 @@ val run :
   ?alpn:string ->
   'edn client_handler ->
   'edn ->
-  [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
+  [ `V1 of H1.Request.t | `V2 of H2.Request.t ] ->
   Mimic.flow ->
   (alpn_response, [> `Msg of string ]) result Lwt.t
 (** [run ?alpn ~client_handler edn req flow] tries communicate to [edn] via

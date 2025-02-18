@@ -36,7 +36,7 @@ let apply v f = f v
 let response_handler :
     type reqd headers request response ro wo.
     _ ->
-    f:(Httpaf.Response.t -> string -> unit Lwt.t) ->
+    f:(H1.Response.t -> string -> unit Lwt.t) ->
     Mimic.flow ->
     (Ipaddr.t * int) option ->
     response ->
@@ -49,17 +49,17 @@ let response_handler :
       let buf = Buffer.create 0x100 in
       let th, wk = Lwt.wait () in
       let on_eof () =
-        Httpaf.Body.close_reader body ;
+        H1.Body.Reader.close body ;
         Lwt.wakeup_later wk () in
       let rec on_read payload ~off ~len =
         Buffer.add_string buf (Bigstringaf.substring payload ~off ~len) ;
-        Httpaf.Body.schedule_read body ~on_eof ~on_read in
-      Httpaf.Body.schedule_read body ~on_eof ~on_read ;
+        H1.Body.Reader.schedule_read body ~on_eof ~on_read in
+      H1.Body.Reader.schedule_read body ~on_eof ~on_read ;
       Lwt.async @@ fun () ->
       Lwt.pick [ (th >|= fun () -> `Done); th_err ] >>= function
       | `Done -> f response (Buffer.contents buf)
       | _ ->
-          Httpaf.Body.close_reader body ;
+          H1.Body.Reader.close body ;
           Lwt.return_unit)
 
 let failf fmt = Format.kasprintf (fun err -> raise (Failure err)) fmt
@@ -168,10 +168,10 @@ let run uri =
   let ctx =
     match Uri.port uri with Some v -> Mimic.add port v ctx | None -> ctx in
   let headers =
-    Option.fold ~none:Httpaf.Headers.empty
-      ~some:(fun hostname -> Httpaf.Headers.of_list [ ("Host", hostname) ])
+    Option.fold ~none:H1.Headers.empty
+      ~some:(fun hostname -> H1.Headers.of_list [ ("Host", hostname) ])
       hostname in
-  let request = Httpaf.Request.create ~headers `GET (Uri.path uri) in
+  let request = H1.Request.create ~headers `GET (Uri.path uri) in
   v >>= fun v ->
   let ctx = Mimic.add stack (Tcpip_stack_socket.V4V6.tcp v) ctx in
   (* XXX(dinosaure): we don't fill the [ctx] with [Paf_mirage.paf_transmission]
@@ -190,9 +190,9 @@ let run uri =
       Lwt.return_error err
   | Ok (Alpn.Response_H2 _) -> Lwt.return_error (`Msg "Invalid protocol (H2)")
   | Ok (Alpn.Response_HTTP_1_1 (body, _)) -> (
-      Httpaf.Body.close_writer body ;
+      H1.Body.Writer.close body ;
       Lwt.pick [ (th >|= fun body -> `Body body); th_err ] >>= function
       | `Body body -> Lwt.return_ok body
       | _ ->
-          Httpaf.Body.close_writer body ;
+          H1.Body.Writer.close body ;
           Lwt.return_error (`Msg "Got an error while sending request"))

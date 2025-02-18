@@ -19,8 +19,8 @@ let response_handler mvar pusher resp body =
   let rec on_read buf ~off ~len =
     let str = Bigstringaf.substring buf ~off ~len in
     pusher (Some str) ;
-    Httpaf.Body.schedule_read ~on_eof ~on_read body in
-  Httpaf.Body.schedule_read ~on_eof ~on_read body ;
+    H1.Body.Reader.schedule_read ~on_eof ~on_read body in
+  H1.Body.Reader.schedule_read ~on_eof ~on_read body ;
   Lwt.async @@ fun () -> Lwt_mvar.put mvar resp
 
 let rec unroll body stream =
@@ -28,26 +28,26 @@ let rec unroll body stream =
   Lwt_stream.get stream >>= function
   | Some str ->
       Log.debug (fun m -> m "Transmit to HTTP/AF: %S." str) ;
-      Httpaf.Body.write_string body str ;
+      H1.Body.Writer.write_string body str ;
       unroll body stream
   | None ->
       Log.debug (fun m -> m "Close the HTTP/AF writer.") ;
-      Httpaf.Body.close_writer body ;
+      H1.Body.Writer.close body ;
       Lwt.return_unit
 
 let transmit cohttp_body httpaf_body =
   match cohttp_body with
-  | `Empty -> Httpaf.Body.close_writer httpaf_body
+  | `Empty -> H1.Body.Writer.close httpaf_body
   | `String str ->
-      Httpaf.Body.write_string httpaf_body str ;
-      Httpaf.Body.close_writer httpaf_body
+      H1.Body.Writer.write_string httpaf_body str ;
+      H1.Body.Writer.close httpaf_body
   | `Strings sstr ->
-      List.iter (Httpaf.Body.write_string httpaf_body) sstr ;
-      Httpaf.Body.close_writer httpaf_body
+      List.iter (H1.Body.Writer.write_string httpaf_body) sstr ;
+      H1.Body.Writer.close httpaf_body
   | `Stream stream -> Lwt.async @@ fun () -> unroll httpaf_body stream
 
 exception Internal_server_error
-exception Invalid_response_body_length of Httpaf.Response.t
+exception Invalid_response_body_length of H1.Response.t
 exception Malformed_response of string
 
 let with_uri uri ctx =
@@ -90,34 +90,37 @@ let with_host headers uri =
     match Uri.port uri with
     | Some port -> Fmt.str "%s:%d" hostname port
     | None -> hostname in
-  Httpaf.Headers.add_unless_exists headers "host" hostname
+  H1.Headers.add_unless_exists headers "host" hostname
 
 let with_transfer_encoding ~chunked (meth : Cohttp.Code.meth) body headers =
-  match (meth, chunked, body, Httpaf.Headers.get headers "content-length") with
+  match (meth, chunked, body, H1.Headers.get headers "content-length") with
   | `GET, _, _, _ -> headers
   | _, (None | Some false), _, Some _ -> headers
   | _, Some true, _, (Some _ | None) | _, None, `Stream _, None ->
       (* XXX(dinosaure): I'm not sure that the [Some _] was right. *)
-      Httpaf.Headers.add_unless_exists headers "transfer-encoding" "chunked"
+      H1.Headers.add_unless_exists headers "transfer-encoding" "chunked"
   | _, (None | Some false), `Empty, None ->
-      Httpaf.Headers.add_unless_exists headers "content-length" "0"
+      H1.Headers.add_unless_exists headers "content-length" "0"
   | _, (None | Some false), `String str, None ->
-      Httpaf.Headers.add_unless_exists headers "content-length"
+      H1.Headers.add_unless_exists headers "content-length"
         (string_of_int (String.length str))
   | _, (None | Some false), `Strings sstr, None ->
       let len = List.fold_right (( + ) <.> String.length) sstr 0 in
-      Httpaf.Headers.add_unless_exists headers "content-length"
+      H1.Headers.add_unless_exists headers "content-length"
         (string_of_int len)
   | _, Some false, `Stream _, None ->
       invalid_arg "Impossible to transfer a stream with a content-length value"
 
-module Httpaf_Client_connection = struct
-  include Httpaf.Client_connection
+module H1_Client_connection = struct
+  include H1.Client_connection
 
   let yield_reader _ = assert false
 
   let next_read_operation t =
-    (next_read_operation t :> [ `Close | `Read | `Yield ])
+    (next_read_operation t :> [ `Close | `Read | `Yield | `Upgrade ])
+
+  let next_write_operation t =
+    (next_write_operation t :> [ `Close of int | `Write of Bigstringaf.t H1.IOVec.t list | `Yield | `Upgrade ])
 end
 
 let call ?(ctx = default_ctx) ?headers
@@ -127,19 +130,19 @@ let call ?(ctx = default_ctx) ?headers
   let config =
     match Mimic.get httpaf_config ctx with
     | Some config -> config
-    | None -> Httpaf.Config.default in
+    | None -> H1.Config.default in
   let headers =
     match headers with
-    | Some headers -> Httpaf.Headers.of_list (Cohttp.Header.to_list headers)
-    | None -> Httpaf.Headers.empty in
+    | Some headers -> H1.Headers.of_list (Cohttp.Header.to_list headers)
+    | None -> H1.Headers.empty in
   let headers = with_host headers uri in
   let headers = with_transfer_encoding ~chunked meth cohttp_body headers in
   let meth =
     match meth with
-    | #Httpaf.Method.t as meth -> meth
+    | #H1.Method.t as meth -> meth
     | #Cohttp.Code.meth as meth -> `Other (Cohttp.Code.string_of_method meth)
   in
-  let req = Httpaf.Request.create ~headers meth (Uri.path_and_query uri) in
+  let req = H1.Request.create ~headers meth (Uri.path_and_query uri) in
   let stream, pusher = Lwt_stream.create () in
   let mvar_res = Lwt_mvar.create_empty () in
   let mvar_err = Lwt_mvar.create_empty () in
@@ -151,9 +154,9 @@ let call ?(ctx = default_ctx) ?headers
       let error_handler = error_handler mvar_err in
       let response_handler = response_handler mvar_res pusher in
       let httpaf_body, conn =
-        Httpaf.Client_connection.request ~config ~error_handler
+        H1.Client_connection.request ~config ~error_handler
           ~response_handler req in
-      Lwt.async (fun () -> Paf.run (module Httpaf_Client_connection) conn flow) ;
+      Lwt.async (fun () -> Paf.run (module H1_Client_connection) conn flow) ;
       transmit cohttp_body httpaf_body ;
       Log.debug (fun m -> m "Body transmitted.") ;
       Lwt.pick
@@ -171,29 +174,29 @@ let call ?(ctx = default_ctx) ?headers
       | `Response resp ->
           Log.debug (fun m -> m "Response received.") ;
           let version =
-            match resp.Httpaf.Response.version with
-            | { Httpaf.Version.major = 1; minor = 0 } -> `HTTP_1_0
+            match resp.H1.Response.version with
+            | { H1.Version.major = 1; minor = 0 } -> `HTTP_1_0
             | { major = 1; minor = 1 } -> `HTTP_1_1
             | { major; minor } -> `Other (Fmt.str "%d.%d" major minor) in
           let status =
             match
-              (resp.Httpaf.Response.status
-                :> [ Cohttp.Code.status | Httpaf.Status.t ])
+              (resp.H1.Response.status
+                :> [ Cohttp.Code.status | H1.Status.t ])
             with
             | #Cohttp.Code.status as status -> status
-            | #Httpaf.Status.t as status -> `Code (Httpaf.Status.to_code status)
+            | #H1.Status.t as status -> `Code (H1.Status.to_code status)
           in
           let encoding =
             match meth with
-            | #Httpaf.Method.standard as meth -> (
-                match Httpaf.Response.body_length ~request_method:meth resp with
+            | #H1.Method.standard as meth -> (
+                match H1.Response.body_length ~request_method:meth resp with
                 | `Chunked | `Close_delimited -> Cohttp.Transfer.Chunked
                 | `Error _err -> raise Internal_server_error
                 | `Fixed length -> Cohttp.Transfer.Fixed length)
             | _ -> Cohttp.Transfer.Chunked in
           let headers =
             Cohttp.Header.of_list
-              (Httpaf.Headers.to_list resp.Httpaf.Response.headers) in
+              (H1.Headers.to_list resp.H1.Response.headers) in
           let resp =
             Cohttp.Response.make ~version ~status ~encoding ~headers () in
           Lwt.return (resp, `Stream stream))
