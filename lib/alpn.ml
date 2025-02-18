@@ -28,11 +28,11 @@ end
 
 type http_1_1_protocol =
   (module REQD
-     with type t = Httpaf.Reqd.t
-      and type request = Httpaf.Request.t
-      and type response = Httpaf.Response.t
-      and type Body.ro = [ `read ] Httpaf.Body.t
-      and type Body.wo = [ `write ] Httpaf.Body.t)
+     with type t = H1.Reqd.t
+      and type request = H1.Request.t
+      and type response = H1.Response.t
+      and type Body.ro = H1.Body.Reader.t
+      and type Body.wo = H1.Body.Writer.t)
 
 type h2_protocol =
   (module REQD
@@ -45,12 +45,12 @@ type h2_protocol =
 type ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol =
   | HTTP_1_1 :
       http_1_1_protocol
-      -> ( Httpaf.Reqd.t,
-           Httpaf.Headers.t,
-           Httpaf.Request.t,
-           Httpaf.Response.t,
-           [ `read ] Httpaf.Body.t,
-           [ `write ] Httpaf.Body.t )
+      -> ( H1.Reqd.t,
+           H1.Headers.t,
+           H1.Request.t,
+           H1.Response.t,
+           H1.Body.Reader.t,
+           H1.Body.Writer.t )
          protocol
   | H2 :
       h2_protocol
@@ -64,25 +64,25 @@ type ('reqd, 'headers, 'request, 'response, 'ro, 'wo) protocol =
 
 let http_1_1 =
   let module M = struct
-    include Httpaf.Reqd
+    include H1.Reqd
 
-    type request = Httpaf.Request.t
-    type response = Httpaf.Response.t
+    type request = H1.Request.t
+    type response = H1.Response.t
 
     module Body = struct
-      type ro = [ `read ] Httpaf.Body.t
-      type wo = [ `write ] Httpaf.Body.t
+      type ro = H1.Body.Reader.t
+      type wo = H1.Body.Writer.t
     end
 
     let respond_with_streaming t ?flush_headers_immediately response =
       respond_with_streaming t ?flush_headers_immediately response
   end in
   (module M : REQD
-    with type t = Httpaf.Reqd.t
-     and type request = Httpaf.Request.t
-     and type response = Httpaf.Response.t
-     and type Body.ro = [ `read ] Httpaf.Body.t
-     and type Body.wo = [ `write ] Httpaf.Body.t)
+    with type t = H1.Reqd.t
+     and type request = H1.Request.t
+     and type response = H1.Response.t
+     and type Body.ro = H1.Body.Reader.t
+     and type Body.wo = H1.Body.Writer.t)
 
 let h2 =
   let module M = struct
@@ -103,13 +103,20 @@ let h2 =
      and type Body.ro = H2.Body.Reader.t
      and type Body.wo = H2.Body.Writer.t)
 
-module Httpaf_Client_connection = struct
-  include Httpaf.Client_connection
+module H1_Client_connection = struct
+  include H1.Client_connection
 
   let yield_reader _ = assert false
 
   let next_read_operation t =
-    (next_read_operation t :> [ `Close | `Read | `Yield ])
+    (next_read_operation t :> [ `Close | `Read | `Yield | `Upgrade ])
+
+  let next_write_operation t =
+    (next_write_operation t
+      :> [ `Close of int
+         | `Write of Bigstringaf.t H2.IOVec.t list
+         | `Yield
+         | `Upgrade ])
 end
 
 type ('flow, 'edn) info = {
@@ -139,6 +146,17 @@ type ('flow, 'edn) server_handler = {
     unit;
 }
 
+module H2_Server_connection = struct
+  include H2.Server_connection
+
+  let next_write_operation t =
+    (next_write_operation t
+      :> [ `Close of int
+         | `Write of Bigstringaf.t H2.IOVec.t list
+         | `Yield
+         | `Upgrade ])
+end
+
 let service :
     ('flow, 'edn) info ->
     (Mimic.flow, 'edn) server_handler ->
@@ -158,10 +176,8 @@ let service :
             respond in
         let request_handler' reqd =
           handler.request flow edn reqd (HTTP_1_1 http_1_1) in
-        let conn =
-          Httpaf.Server_connection.create ~error_handler request_handler' in
-        Lwt.return_ok
-          (flow, Paf.Runtime ((module Httpaf.Server_connection), conn))
+        let conn = H1.Server_connection.create ~error_handler request_handler' in
+        Lwt.return_ok (flow, Paf.Runtime ((module H1.Server_connection), conn))
     | Some "h2" ->
         let edn = info.peer flow in
         let flow = info.injection flow in
@@ -170,7 +186,7 @@ let service :
         in
         let request_handler' reqd = handler.request flow edn reqd (H2 h2) in
         let conn = H2.Server_connection.create ~error_handler request_handler' in
-        Lwt.return_ok (flow, Paf.Runtime ((module H2.Server_connection), conn))
+        Lwt.return_ok (flow, Paf.Runtime ((module H2_Server_connection), conn))
     | Some protocol ->
         Lwt.return_error (`Msg (Fmt.str "Invalid protocol %S." protocol)) in
   Paf.service connection connect accept close
@@ -178,7 +194,7 @@ let service :
 type client_error =
   [ `Exn of exn
   | `Malformed_response of string
-  | `Invalid_response_body_length_v1 of Httpaf.Response.t
+  | `Invalid_response_body_length_v1 of H1.Response.t
   | `Invalid_response_body_length_v2 of H2.Response.t
   | `Protocol_error of H2.Error_code.t * string ]
 
@@ -211,9 +227,20 @@ type 'edn client_handler = {
     unit;
 }
 
+module H2_Client_connection = struct
+  include H2.Client_connection
+
+  let next_write_operation t =
+    (next_write_operation t
+      :> [ `Close of int
+         | `Write of Bigstringaf.t H2.IOVec.t list
+         | `Yield
+         | `Upgrade ])
+end
+
 type alpn_response =
   | Response_HTTP_1_1 :
-      ([ `write ] Httpaf.Body.t * Httpaf.Client_connection.t)
+      (H1.Body.Writer.t * H1.Client_connection.t)
       -> alpn_response
   | Response_H2 : H2.Body.Writer.t * H2.Client_connection.t -> alpn_response
 
@@ -230,7 +257,7 @@ let run ?alpn handler edn request flow =
       let body =
         H2.Client_connection.request conn request ~error_handler
           ~response_handler in
-      Lwt.async (fun () -> Paf.run (module H2.Client_connection) conn flow) ;
+      Lwt.async (fun () -> Paf.run (module H2_Client_connection) conn flow) ;
       Lwt.return_ok (Response_H2 (body, conn))
   | (Some "http/1.1" | None), `V1 request ->
       let error_handler error =
@@ -238,9 +265,9 @@ let run ?alpn handler edn request flow =
       let response_handler response body =
         handler.response flow edn response body (HTTP_1_1 http_1_1) in
       let body, conn =
-        Httpaf.Client_connection.request request ~error_handler
-          ~response_handler in
-      Lwt.async (fun () -> Paf.run (module Httpaf_Client_connection) conn flow) ;
+        H1.Client_connection.request request ~error_handler ~response_handler
+      in
+      Lwt.async (fun () -> Paf.run (module H1_Client_connection) conn flow) ;
       Lwt.return_ok (Response_HTTP_1_1 (body, conn))
   | Some protocol, _ ->
       Lwt.return_error

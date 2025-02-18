@@ -127,14 +127,14 @@ let body_to_string body =
   let th, wk = Lwt.wait () in
   let on_eof () =
     Lwt.wakeup_later wk (Buffer.contents buf) ;
-    Httpaf.Body.close_reader body in
+    H1.Body.Reader.close body in
   let rec on_read str ~off ~len =
     let str = Bigstringaf.substring str ~off ~len in
     Logs.debug (fun m -> m "Received %S." str) ;
     Buffer.add_string buf str ;
-    Httpaf.Body.schedule_read body ~on_eof ~on_read in
+    H1.Body.Reader.schedule_read body ~on_eof ~on_read in
   Logs.debug (fun m -> m "Start to receive the body.") ;
-  Httpaf.Body.schedule_read body ~on_eof ~on_read ;
+  H1.Body.Reader.schedule_read body ~on_eof ~on_read ;
   th
 
 let query_to_assoc str =
@@ -147,7 +147,7 @@ let query_to_assoc str =
   List.map f lst
 
 let request_handler (ip, port) reqd =
-  let open Httpaf in
+  let open H1 in
   let req = Reqd.request reqd in
   Logs.debug (fun m ->
       m "Got a connection from %a:%d %s." Ipaddr.pp ip port req.Request.target) ;

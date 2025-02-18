@@ -120,9 +120,9 @@ module type S = sig
       ]} *)
 
   val http_service :
-    ?config:Httpaf.Config.t ->
-    error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (TCP.flow -> dst -> Httpaf.Server_connection.request_handler) ->
+    ?config:H1.Config.t ->
+    error_handler:(dst -> H1.Server_connection.error_handler) ->
+    (TCP.flow -> dst -> H1.Server_connection.request_handler) ->
     t Paf.service
   (** [http_service ~error_handler request_handler] makes an HTTP/AF service
       where any HTTP/1.1 requests are handled by [request_handler]. The returned
@@ -130,9 +130,9 @@ module type S = sig
 
   val https_service :
     tls:Tls.Config.server ->
-    ?config:Httpaf.Config.t ->
-    error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (TLS.flow -> dst -> Httpaf.Server_connection.request_handler) ->
+    ?config:H1.Config.t ->
+    error_handler:(dst -> H1.Server_connection.error_handler) ->
+    (TLS.flow -> dst -> H1.Server_connection.request_handler) ->
     t Paf.service
   (** [https_service ~tls ~error_handler request_handler] makes an HTTP/AF
       service over TLS (from the given TLS configuration). Then, HTTP/1.1
@@ -152,7 +152,7 @@ module type S = sig
 
   val alpn_service :
     tls:Tls.Config.server ->
-    ?config:Httpaf.Config.t * H2.Config.t ->
+    ?config:H1.Config.t * H2.Config.t ->
     (TLS.flow, dst) Alpn.server_handler ->
     t Paf.service
   (** [alpn_service ~tls handler] makes an H2/HTTP/AF service over TLS (from the
@@ -184,7 +184,7 @@ val paf_transmission : transmission Mimic.value
 val run :
   ctx:Mimic.ctx ->
   (Ipaddr.t * int) option Alpn.client_handler ->
-  [ `V1 of Httpaf.Request.t | `V2 of H2.Request.t ] ->
+  [ `V1 of H1.Request.t | `V2 of H2.Request.t ] ->
   (Alpn.alpn_response, [> Mimic.error ]) result Lwt.t
 (** [run ~ctx handler req] sends an HTTP request (H2 or HTTP/1.1) to a peer
     which can be reached {i via} the given Mimic's [ctx]. If the connection is

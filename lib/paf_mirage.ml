@@ -69,21 +69,21 @@ module type S = sig
   val close : t -> unit Lwt.t
 
   val http_service :
-    ?config:Httpaf.Config.t ->
-    error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (TCP.flow -> dst -> Httpaf.Server_connection.request_handler) ->
+    ?config:H1.Config.t ->
+    error_handler:(dst -> H1.Server_connection.error_handler) ->
+    (TCP.flow -> dst -> H1.Server_connection.request_handler) ->
     t Paf.service
 
   val https_service :
     tls:Tls.Config.server ->
-    ?config:Httpaf.Config.t ->
-    error_handler:(dst -> Httpaf.Server_connection.error_handler) ->
-    (TLS.flow -> dst -> Httpaf.Server_connection.request_handler) ->
+    ?config:H1.Config.t ->
+    error_handler:(dst -> H1.Server_connection.error_handler) ->
+    (TLS.flow -> dst -> H1.Server_connection.request_handler) ->
     t Paf.service
 
   val alpn_service :
     tls:Tls.Config.server ->
-    ?config:Httpaf.Config.t * H2.Config.t ->
+    ?config:H1.Config.t * H2.Config.t ->
     (TLS.flow, dst) Alpn.server_handler ->
     t Paf.service
 
@@ -265,10 +265,10 @@ module Make (Stack : Tcpip.Tcp.S) :
       let error_handler = error_handler dst in
       let request_handler' reqd = request_handler flow dst reqd in
       let conn =
-        Httpaf.Server_connection.create ?config ~error_handler request_handler'
+        H1.Server_connection.create ?config ~error_handler request_handler'
       in
-      Lwt.return_ok
-        (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
+      Lwt.return_ok (R.T flow, Paf.Runtime ((module H1.Server_connection), conn))
+    in
     Paf.service connection Lwt.return_ok accept close
 
   let https_service ~tls ?config ~error_handler request_handler =
@@ -290,10 +290,10 @@ module Make (Stack : Tcpip.Tcp.S) :
       let error_handler = error_handler dst in
       let request_handler' reqd = request_handler flow dst reqd in
       let conn =
-        Httpaf.Server_connection.create ?config ~error_handler request_handler'
+        H1.Server_connection.create ?config ~error_handler request_handler'
       in
-      Lwt.return_ok
-        (R.T flow, Paf.Runtime ((module Httpaf.Server_connection), conn)) in
+      Lwt.return_ok (R.T flow, Paf.Runtime ((module H1.Server_connection), conn))
+    in
     Paf.service connection handshake accept close
 
   let alpn =
@@ -313,7 +313,7 @@ module Make (Stack : Tcpip.Tcp.S) :
       Alpn.injection;
     }
 
-  let alpn_service ~tls ?config:(_ = (Httpaf.Config.default, H2.Config.default))
+  let alpn_service ~tls ?config:(_ = (H1.Config.default, H2.Config.default))
       handler =
     let handshake tcp_flow =
       let dst = TCP.dst tcp_flow in
@@ -336,7 +336,8 @@ module Make (Stack : Tcpip.Tcp.S) :
       | _ -> assert false
       (* XXX(dinosaure): this case should never occur. Indeed, the [injection]
          given to [Alpn.service] only create a [tls_protocol] flow. We just
-         destruct it and give it to [request_handler]. *) in
+         destruct it and give it to [request_handler]. *)
+    in
     Alpn.service alpn { handler with request } handshake accept close
 
   let serve ?stop service t = Paf.serve ?stop service t

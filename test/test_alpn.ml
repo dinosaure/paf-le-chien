@@ -97,8 +97,7 @@ type version = HTTP_1_1 | HTTP_2_0
 
 let error_handler _ _protocol ?request:_ _error _response = ()
 
-let request_handler :
-    type reqd headers request response ro wo.
+let request_handler : type reqd headers request response ro wo.
     _ ->
     _ ->
     _ ->
@@ -161,7 +160,7 @@ let test01 =
   let tls =
     Result.get_ok
       (Tls.Config.client ~authenticator ~alpn_protocols:[ "http/1.1" ] ()) in
-  let req = `V1 (Httpaf.Request.create `GET "/") in
+  let req = `V1 (H1.Request.create `GET "/") in
   Lwt.both
     ( unix_stack () >|= Tcpip_stack_socket.V4V6.tcp >>= fun stack ->
       P.init ~port stack >>= fun t ->
