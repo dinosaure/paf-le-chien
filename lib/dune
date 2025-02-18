@@ -5,6 +5,12 @@
  (libraries faraday bigstringaf ke mimic))
 
 (library
+ (name pafe)
+ (public_name paf.e)
+ (modules pafe)
+ (libraries miou faraday bigstringaf ke mimic.e))
+
+(library
  (name alpn)
  (public_name paf.alpn)
  (modules alpn)
