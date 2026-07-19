@@ -9,7 +9,7 @@ homepage: "https://github.com/dinosaure/paf-le-chien"
 doc: "https://dinosaure.github.io/paf-le-chien/"
 bug-reports: "https://github.com/dinosaure/paf-le-chien/issues"
 depends: [
-  "ocaml" {>= "4.08.0"}
+  "ocaml" {>= "4.12.0"}
   "dune" {>= "2.0.0"}
   "paf" {= version}
   "cohttp-lwt" {< "6.0.0~"}

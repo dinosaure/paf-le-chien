@@ -124,7 +124,7 @@ module Make (Flow : Mirage_flow.S) = struct
     | Ok (`Data v) ->
         let len = Cstruct.length v in
         Ke.Rke.N.push flow.queue ~blit ~length:Cstruct.length ~off:0 ~len v ;
-        let[@warning "-8"] (slice :: _) = Ke.Rke.N.peek flow.queue in
+        let[@warning "-partial-match"] (slice :: _) = Ke.Rke.N.peek flow.queue in
         let shift = read slice ~off:0 ~len:(Bigstringaf.length slice) in
         Ke.Rke.N.shift_exn flow.queue shift ;
         Lwt.return `Continue
