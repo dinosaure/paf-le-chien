@@ -113,11 +113,11 @@ type ('flow, 'edn) info = {
     you to {i inject} your flow as a [Mimic.flow]:
 
     {[
-      let _, protocol = Mimic.register ~name:"my-protocol" (module My_protocol)
+    let _, protocol = Mimic.register ~name:"my-protocol" (module My_protocol)
 
-      let injection (flow : My_protocol.flow) : Mimic.flow =
-        let module R = (val Mimic.repr protocol) in
-        R.T flow
+    let injection (flow : My_protocol.flow) : Mimic.flow =
+      let module R = (val Mimic.repr protocol) in
+      R.T flow
     ]} *)
 
 type ('flow, 'edn) server_handler = {
@@ -289,10 +289,10 @@ val run :
     Here is an example with [mimic]:
 
     {[
-      let run uri request =
-        let ctx = ctx_of_uri uri in
-        (* See Mimic for more details. *)
-        Mimic.resolve ctx >>= function
-        | Error _ as err -> Lwt.return err
-        | Ok flow -> run ?alpn:None handler uri request flow
+    let run uri request =
+      let ctx = ctx_of_uri uri in
+      (* See Mimic for more details. *)
+      Mimic.resolve ctx >>= function
+      | Error _ as err -> Lwt.return err
+      | Ok flow -> run ?alpn:None handler uri request flow
     ]} *)

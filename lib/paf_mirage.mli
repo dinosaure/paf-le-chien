@@ -111,12 +111,12 @@ module type S = sig
       Below, you can see a simple example:
 
       {[
-        let run ~error_handler ~request_handler =
-          Paf_mirage.init ~port:8080 stack >>= fun t ->
-          Paf_mirage.http_service ~error_handler request_handler
-          >>= fun service ->
-          let (`Initialized th) = Paf_mirage.serve service t in
-          th
+      let run ~error_handler ~request_handler =
+        Paf_mirage.init ~port:8080 stack >>= fun t ->
+        Paf_mirage.http_service ~error_handler request_handler
+        >>= fun service ->
+        let (`Initialized th) = Paf_mirage.serve service t in
+        th
       ]} *)
 
   val http_service :
