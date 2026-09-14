@@ -182,7 +182,7 @@ the histogram of them. It's not really a benchmark as is but it a good
 stress-test and we check that we don't have failure from the server.
 
 [httpaf]: https://github.com/inhabitedtype/httpaf
-[mimic]: https://github.com/mirage/ocaml-git
+[mimic]: https://github.com/dinosaure/mimic
 [mirage-tcpip]: https://github.com/mirage/mirage-tcpip
 [letsencrypt]: https://github.com/mmaker/ocaml-letsencrypt
 [stackv4v6]: https://github.com/mirage/mirage-stack
